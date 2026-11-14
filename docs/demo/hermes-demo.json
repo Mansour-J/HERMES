@@ -163,6 +163,21 @@
               "gap": 0,
               "children": [
                 {
+                  "id": "demo-bar",
+                  "type": "block",
+                  "size": {
+                    "px": 40
+                  },
+                  "min": 40,
+                  "content": {
+                    "mod": "hermes",
+                    "props": {
+                      "node": "work-side",
+                      "demo": true
+                    }
+                  }
+                },
+                {
                   "id": "demo-daily",
                   "type": "block",
                   "size": {

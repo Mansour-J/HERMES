@@ -68,6 +68,12 @@ function find(node, id) {
 
 // The layout node this copy sits in. Its width says rail or list.
 const nodeId = () => props()?.node ?? "daily";
+// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// spins while any section does. Shared, so every mod sees it.
+const busyKey = () => `${nodeId()}.busy.daily-setup`;
+const tellBusy = (busy) => {
+  if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
+};
 const width = () => find(layout(), nodeId())?.size?.px;
 const narrow = () => (width() ?? Infinity) < 160;
 // When the layout frames this node itself (a border on it), the mod draws no card of its own.
@@ -186,6 +192,7 @@ export default class DailySetup extends View {
     this.checkedAt = load("checked-at", 0);
     this.running = new Set();
     this.checking = false;
+    tellBusy(false);
     this.cancelled = false;
     // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
     if (props()?.demo) {
@@ -194,13 +201,13 @@ export default class DailySetup extends View {
       this.checkedAt = Date.now() - 3 * 60000;
     }
     // `daily-setup.run`, `.cancel`, `.check` and `.toggle` (keys.json, or `herdr-app do`) are
-    // the buttons.
+    // the buttons. `.refresh` is `.check`, as Refresh all sends it.
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
         if (command === "run") this.runAll(cx);
         if (command === "cancel") this.cancel(cx);
-        if (command === "check") this.check(cx);
+        if (command === "check" || command === "refresh") this.check(cx);
         if (command === "toggle") toggle();
       }
     });
@@ -210,6 +217,7 @@ export default class DailySetup extends View {
   check(cx) {
     if (this.checking || this.running.size || props()?.demo || unset().length) return;
     this.checking = true;
+    tellBusy(true);
     cx.notify();
     cx.spawn(async (cx) => {
       const c = config();
@@ -227,6 +235,7 @@ export default class DailySetup extends View {
       save("steps", this.steps);
       save("checked-at", this.checkedAt);
       this.checking = false;
+      tellBusy(false);
       cx.notify();
     });
   }

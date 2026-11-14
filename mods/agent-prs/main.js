@@ -80,6 +80,12 @@ function find(node, id) {
 // The layout node this copy sits in. Its width says rail or list, as the left sidebar's does,
 // so dragging its edge narrow folds it too.
 const nodeId = () => props()?.node ?? "prs";
+// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// spins while any section does. Shared, so every mod sees it.
+const busyKey = () => `${nodeId()}.busy.agent-prs`;
+const tellBusy = (busy) => {
+  if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
+};
 const width = () => find(layout(), nodeId())?.size?.px;
 const narrow = () => (width() ?? Infinity) < 160;
 // When the layout frames this node itself (a border on it), the mod draws no card of its own.
@@ -355,6 +361,7 @@ export default class AgentPrs extends View {
     this.scanning = false;
     this.fetching = false;
     this.spinning = false;
+    tellBusy(false);
     this.problem = null;
     // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
     if (props()?.demo) {
@@ -377,6 +384,7 @@ export default class AgentPrs extends View {
   refreshNow(cx) {
     if (props()?.demo) return;
     this.spinning = true;
+    tellBusy(true);
     this.scan(cx);
     this.fetch(cx);
     cx.notify();
@@ -406,6 +414,7 @@ export default class AgentPrs extends View {
       } finally {
         this.fetching = false;
         this.spinning = this.scanning;
+        tellBusy(this.spinning);
         cx.notify();
       }
     });
@@ -421,6 +430,7 @@ export default class AgentPrs extends View {
       } catch {}
       this.scanning = false;
       this.spinning = this.fetching;
+      tellBusy(this.spinning);
       cx.notify();
     });
   }

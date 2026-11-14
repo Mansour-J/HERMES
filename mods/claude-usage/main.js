@@ -42,6 +42,12 @@ function find(node, id) {
 
 // The layout node this copy sits in. Its width says rail or list.
 const nodeId = () => props()?.node ?? "claude-usage";
+// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// spins while any section does. Shared, so every mod sees it.
+const busyKey = () => `${nodeId()}.busy.claude-usage`;
+const tellBusy = (busy) => {
+  if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
+};
 const width = () => find(layout(), nodeId())?.size?.px;
 const narrow = () => (width() ?? Infinity) < 160;
 // When the layout frames this node itself (a border on it), the mod draws no card of its own.
@@ -173,6 +179,7 @@ export default class ClaudeUsage extends View {
     this.checkedAt = load("checked-at", 0);
     this.account = load("account", null); // see accountOf
     this.busy = false;
+    tellBusy(false);
     this.problem = null;
     // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
     if (props()?.demo) {
@@ -202,6 +209,7 @@ export default class ClaudeUsage extends View {
   refresh(cx) {
     if (this.busy || props()?.demo) return;
     this.busy = true;
+    tellBusy(true);
     this.problem = null;
     cx.notify();
     cx.spawn(async (cx) => {
@@ -240,6 +248,7 @@ export default class ClaudeUsage extends View {
         save("account", who);
       }
       this.busy = false;
+      tellBusy(false);
       cx.notify();
     });
   }

@@ -133,6 +133,12 @@ function find(node, id) {
 
 // The layout node this copy sits in; its width says rail or list.
 const nodeId = () => props()?.node ?? "jira";
+// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// spins while any section does. Shared, so every mod sees it.
+const busyKey = () => `${nodeId()}.busy.jira-tickets`;
+const tellBusy = (busy) => {
+  if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
+};
 const width = () => find(layout(), nodeId())?.size?.px;
 const narrow = () => (width() ?? Infinity) < 160;
 // When the layout frames this node itself (a border on it), the mod draws no card of its own.
@@ -363,6 +369,7 @@ export default class JiraTickets extends View {
       cx.notify();
     });
     this.busy = false;
+    tellBusy(false);
     this.problem = null;
     // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
     if (props()?.demo) {
@@ -395,6 +402,7 @@ export default class JiraTickets extends View {
   refresh(cx) {
     if (this.busy || props()?.demo) return;
     this.busy = true;
+    tellBusy(true);
     cx.notify();
     cx.spawn(async (cx) => {
       try {
@@ -409,6 +417,7 @@ export default class JiraTickets extends View {
         this.progressProblem = `Couldn't read the tickets' progress: ${e?.message ?? e}`;
       }
       this.busy = false;
+      tellBusy(false);
       cx.notify();
     });
   }

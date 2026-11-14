@@ -30,7 +30,7 @@
 | 📊 | **Claude** | Which Claude account is signed in, and its plan usage as `/usage` shows it: session, week, per-model limits, each with when it resets. |
 | 🔀 | **Pull requests** | Every open PR of mine, grouped by repository, with CI, reviews, threads, conflicts and a pipeline bar. |
 | 🎫 | **Jira** | My sprint, next sprint and backlog, each ticket with a plan → implement → PR → merged progress bar and buttons that start the work. |
-| 🗂️ | **One panel** | All four stacked in one framed column, folding to a slim rail of icons and counts. |
+| 🗂️ | **One panel** | All four stacked in one framed column under a bar with **REFRESH ALL**, folding to a slim rail of icons and counts. |
 | 🔒 | **Safe by design** | No secret ever reaches the panel's code. Nothing runs, fetches or refreshes until you press a button. |
 
 ### 🌅 Daily
@@ -87,6 +87,8 @@ My tickets in the **current sprint**, the **next sprint** and the **backlog**, r
 
 <img src="docs/screenshots/rail.png" width="55" align="left" alt="The panel folded to a rail">
 
+The bar at the top has **REFRESH ALL**: it presses every section's own refresh at once, so each section's ↻ spins as if you'd clicked it, and the bar reads *Refreshing…* until the last one is done. Each ↻ still refreshes just its own section.
+
 The panel button at the top right of any section folds the whole panel to a 44px rail. Each section keeps its icon and a count there: steps done, session used, open PRs, open tickets. Unfold it and every section gets its height back.
 
 The panel's frame, dividers and rounded corners come from the layout, not the mods.
@@ -99,7 +101,8 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 
 | Command | Does |
 |---|---|
-| `daily-setup.run` · `.cancel` · `.check` | run everything · stop a waiting sign-in · check where each step stands |
+| `hermes.refresh` | refresh every section at once (REFRESH ALL) |
+| `daily-setup.run` · `.cancel` · `.check` | run everything · stop a waiting sign-in · check where each step stands (`.refresh` too) |
 | `claude-usage.refresh` | check Claude usage |
 | `agent-prs.refresh` | load open PRs |
 | `jira-tickets.refresh` | load tickets |
@@ -109,7 +112,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 
 ## 🔒 Security
 
-- **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻ or a run button.
+- **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻, REFRESH ALL or a run button.
 - **Secrets never reach the mods.** The ECR password and the CodeArtifact token stay in shell variables and are passed on by `printf`, a builtin. So they never appear in a process's arguments (visible in `ps`), in output, or in JavaScript.
 - **The token file is safe.** It's written owner-only (600), built beside the old file and swapped in whole, so it's never half-written and a failed run leaves it untouched.
 - **Claude usage needs no token.** It's read through Claude Code itself, and of the account only the email, organization, plan and sign-in end are kept.
@@ -154,6 +157,7 @@ Herdr keeps each section's saved state per set of layout props, so changing a se
 
 ```
 mods/
+  hermes/          the bar: the HERMES mark and REFRESH ALL
   daily-setup/     🌅 Daily: the `daily` shell function as buttons
   claude-usage/    📊 Claude: plan usage
   agent-prs/       🔀 Pull requests
@@ -202,6 +206,7 @@ rm ~/.config/herdr-app/layouts/hermes-demo.json
 
 Remove the links:
 
+- `~/.config/herdr-app/mods/hermes`
 - `~/.config/herdr-app/mods/daily-setup`
 - `~/.config/herdr-app/mods/claude-usage`
 - `~/.config/herdr-app/mods/agent-prs`
