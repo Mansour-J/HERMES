@@ -27,7 +27,7 @@
 | | Section | What it does |
 |---|---|---|
 | 🌅 | **Daily** | My start-of-day setup as buttons: AWS sign-in, Docker login to ECR, CodeArtifact token. Each step counts down until it expires. |
-| 📊 | **Claude** | My Claude plan usage, as `/usage` shows it: session, week, per-model limits, each with when it resets. |
+| 📊 | **Claude** | Which Claude account is signed in, and its plan usage as `/usage` shows it: session, week, per-model limits, each with when it resets. |
 | 🔀 | **Pull requests** | Every open PR of mine, grouped by repository, with CI, reviews, threads, conflicts and a pipeline bar. |
 | 🎫 | **Jira** | My sprint, next sprint and backlog, each ticket with a plan → implement → PR → merged progress bar and buttons that start the work. |
 | 🗂️ | **One panel** | All four stacked in one framed column, folding to a slim rail of icons and counts. |
@@ -46,9 +46,10 @@ What my `daily` shell function does, without the terminal.
 
 <img src="docs/screenshots/daily-claude.png" width="440" align="right" alt="The Daily and Claude sections">
 
+- **The account** Claude Code is signed in with: its email, organization and plan. Hover it for when the sign-in ends.
 - **Session**, **week (all models)** and **any model's own weekly limit**, each as a bar with its percentage and when it resets.
 - Bars turn amber from 80% and red at 100%.
-- It asks Claude Code itself (its `get_usage` request). No prompt is sent, so no model runs and it costs nothing, and the panel never touches your login.
+- It asks Claude Code itself (its `get_usage` request, and `claude auth status` for the account). No prompt is sent, so no model runs and it costs nothing, and the panel never touches your login.
 - Reset times count down between checks. A window that has reset says so.
 
 <br clear="right">
@@ -111,7 +112,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 - **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻ or a run button.
 - **Secrets never reach the mods.** The ECR password and the CodeArtifact token stay in shell variables and are passed on by `printf`, a builtin. So they never appear in a process's arguments (visible in `ps`), in output, or in JavaScript.
 - **The token file is safe.** It's written owner-only (600), built beside the old file and swapped in whole, so it's never half-written and a failed run leaves it untouched.
-- **Claude usage needs no token.** It's read through Claude Code itself.
+- **Claude usage needs no token.** It's read through Claude Code itself, and of the account only the email, organization, plan and sign-in end are kept.
 - **Your details stay out of the repo.** Your AWS account, Jira site, folders and repository notes live in a settings file outside it, and are only filled in on your machine.
 - **Error text is cleaned.** Anything token-shaped is cut before it's shown or saved.
 
@@ -191,6 +192,11 @@ herdr-app shot panel.png
 herdr-app do layout.switch --name main-prs
 rm ~/.config/herdr-app/layouts/hermes-demo.json
 ```
+
+## 🎨 Icons
+
+- Glyphs (sunrise, cloud, ticket, refresh, …): [Lucide](https://lucide.dev), ISC.
+- Brand marks: [Simple Icons](https://simpleicons.org), CC0. Jira's is in this repo; Docker, Gradle, GitHub and Claude are Herdr's own copies. Brands are their owners' trademarks. Simple Icons no longer carries an AWS mark, so the AWS sign-in shows a cloud.
 
 ## ↩️ Undo
 

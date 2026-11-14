@@ -181,7 +181,7 @@
                   "id": "demo-claude",
                   "type": "block",
                   "size": {
-                    "px": 134
+                    "px": 176
                   },
                   "min": 84,
                   "content": {

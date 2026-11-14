@@ -36,11 +36,15 @@ const registry = (c) => `${c.account}.dkr.ecr.${c.region}.amazonaws.com`;
 // How long an ECR login and a CodeArtifact token last.
 const LASTS = 12 * 3600000;
 
+// Each step's icon says what it sets up: AWS (a cloud: the AWS marks aren't free to use),
+// Docker and Gradle (Herdr's own Simple Icons marks). A null color is the theme's text.
 const STEPS = [
-  { id: "sso", label: "AWS sign-in", about: (c) => `An SSO session for ${c.profile}` },
-  { id: "ecr", label: "ECR login", about: (c) => `Docker logged in to ${registry(c)}` },
-  { id: "codeartifact", label: "CodeArtifact token", about: (c) => `A token for the ${c.domain} domain in ~/.gradle/gradle.properties` },
+  { id: "sso", label: "AWS sign-in", icon: ICON("cloud"), color: "#FF9900", about: (c) => `An SSO session for ${c.profile}` },
+  { id: "ecr", label: "ECR login", icon: "icons/docker.svg", color: "#2496ED", about: (c) => `Docker logged in to ${registry(c)}` },
+  { id: "codeartifact", label: "CodeArtifact token", icon: "icons/gradle.svg", color: null, about: (c) => `A token for the ${c.domain} domain in ~/.gradle/gradle.properties` },
 ];
+// The title's sunrise.
+const SUNRISE = "#F5B83D";
 
 // A theme color at the given opacity (two hex digits), whatever form the theme gave it in:
 // some theme colors already carry their own (#rrggbbaa), and the two multiply.
@@ -363,6 +367,7 @@ export default class DailySetup extends View {
       .gap(8)
       .items_center()
       .child(this.glyph(t, v.state))
+      .child(svg(step.icon).size(13).flex_none().text_color(step.color ?? t.foreground))
       .child(div().flex_none().text_color(t.foreground).child(step.label))
       .child(div().flex_1().min_w(0).truncate().text_right().text_size(11.5).text_color(this.color(t, v.state)).child(v.text))
       .child(
@@ -441,6 +446,7 @@ export default class DailySetup extends View {
           .items_center()
           .border_b(1)
           .border_color(t.border)
+          .child(svg(ICON("sunrise")).size(13).flex_none().text_color(SUNRISE))
           .child(div().font_medium().child("Daily"))
           .child(div().text_size(11.5).text_color(color).child(word))
           .child(div().flex_1())

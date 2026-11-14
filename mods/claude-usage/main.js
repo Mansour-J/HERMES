@@ -6,6 +6,10 @@
 // sent, so no model runs and nothing is spent. The login stays inside Claude Code: this mod
 // never reads a token or calls an API itself, and the answer holds no credentials.
 //
+// Above the limits, the account Claude Code is signed in with: email, organization and plan,
+// from `claude auth status` (Claude Code's own account summary, which holds no credentials).
+// Only those fields are kept.
+//
 // Nothing refreshes by itself: press ↻. Between checks the reset times count down, and a
 // window that has reset since is shown as such.
 
@@ -91,6 +95,11 @@ function until(ms) {
   return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayOf = (ms) => {
+  const d = new Date(ms);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+};
 
 // One headless Claude Code run that's asked for usage and nothing else. Its stdin is the one
 // request, then closed, so it exits once it has answered.
@@ -105,6 +114,27 @@ function askUsage() {
     ],
     { timeout: 60000 },
   );
+}
+
+// Who Claude Code is signed in as. Its stdin is closed, as headless Claude Code wants.
+function askAccount() {
+  return exec("sh", ["-c", "exec claude auth status --json < /dev/null"], { timeout: 30000 });
+}
+
+// The account fields shown, and nothing else from the answer.
+function accountOf(stdout) {
+  const text = String(stdout ?? "");
+  const a = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+  const str = (v) => (typeof v === "string" && v ? v : null);
+  return {
+    signedIn: a.loggedIn === true,
+    email: str(a.email),
+    org: str(a.orgName),
+    plan: str(a.subscriptionType),
+    method: str(a.authMethod),
+    provider: str(a.apiProvider),
+    endsAt: (str(a.loginExpiresAt) && Date.parse(a.loginExpiresAt)) || 0,
+  };
 }
 
 // The rows to show, from Claude Code's answer: its `limits`, in the server's order, or the
@@ -141,13 +171,14 @@ export default class ClaudeUsage extends View {
     // The last answer, so the section has something to show the moment Herdr starts.
     this.usage = load("usage", null); // { plan, available, rows }
     this.checkedAt = load("checked-at", 0);
+    this.account = load("account", null); // see accountOf
     this.busy = false;
     this.problem = null;
     // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
     if (props()?.demo) {
       const later = (minutes) => Date.now() + minutes * 60000;
       this.usage = {
-        plan: "max",
+        plan: "team",
         available: true,
         rows: [
           { kind: "session", label: "Session", about: "The five-hour session limit.", percent: 38, severity: "normal", resetsAt: later(131) },
@@ -156,6 +187,7 @@ export default class ClaudeUsage extends View {
         ],
       };
       this.checkedAt = Date.now() - 2 * 60000;
+      this.account = { signedIn: true, email: "ada@olympus.dev", org: "Olympus Engineering", plan: "team", method: "claude.ai", provider: "firstParty", endsAt: later(9 * 1440) };
     }
     // `claude-usage.refresh` and `.toggle` (keys.json, or `herdr-app do`) are the buttons.
     cx.spawn(async (cx) => {
@@ -173,6 +205,10 @@ export default class ClaudeUsage extends View {
     this.problem = null;
     cx.notify();
     cx.spawn(async (cx) => {
+      // The account is looked up alongside; if that fails, the last one known stays.
+      const account = askAccount()
+        .then((r) => (r.code === 0 ? accountOf(r.stdout) : null))
+        .catch(() => null);
       try {
         const r = await askUsage();
         let answer = null;
@@ -197,6 +233,11 @@ export default class ClaudeUsage extends View {
         save("checked-at", this.checkedAt);
       } catch (e) {
         this.problem = String(e?.message ?? e).slice(0, 200);
+      }
+      const who = await account;
+      if (who) {
+        this.account = who;
+        save("account", who);
       }
       this.busy = false;
       cx.notify();
@@ -261,6 +302,47 @@ export default class ClaudeUsage extends View {
           .text_size(11)
           .text_color(t.dim)
           .child(!row.resetsAt ? "" : reset ? "reset" : `in ${until(row.resetsAt - Date.now())}`),
+      );
+  }
+
+  // The signed-in account: email over organization, and the plan.
+  accountRow(t) {
+    const a = this.account;
+    if (!a.signedIn)
+      return div().px(14).pt(8).pb(2).text_size(12).text_color(t.blocked).child("Claude Code isn't signed in: run `claude auth login`.");
+    const plan = a.plan ?? (a.provider && a.provider !== "firstParty" ? a.provider : "API key");
+    const how = a.method === "claude.ai" ? `a Claude ${cap(plan)} account` : `${plan === "API key" ? "an API key" : cap(plan)}`;
+    return h_flex()
+      .id("account")
+      .flex_none()
+      .px(14)
+      .pt(8)
+      .pb(4)
+      .gap(8)
+      .items_center()
+      .tooltip(`Signed in to Claude Code with ${how}${a.org ? ` (${a.org})` : ""}.${a.endsAt ? ` The sign-in lasts until about ${dayOf(a.endsAt)}.` : ""}`)
+      .child(svg(ICON("user")).size(14).flex_none().text_color(t.dim))
+      .child(
+        v_flex()
+          .flex_1()
+          .min_w(0)
+          .child(div().truncate().text_size(12).text_color(t.foreground).child(a.email ?? "Signed in"))
+          .when(Boolean(a.org), (el) => el.child(div().truncate().text_size(10.5).text_color(t.dim).child(a.org))),
+      )
+      .child(
+        div()
+          .flex_none()
+          .h(18)
+          .px(6)
+          .flex()
+          .items_center()
+          .rounded(4)
+          .border_1()
+          .border_color(t.border)
+          .text_size(10)
+          .font_semibold()
+          .text_color(CLAUDE_ORANGE)
+          .child(plan.toUpperCase()),
       );
   }
 
@@ -344,6 +426,7 @@ export default class ClaudeUsage extends View {
       )
       .when(Boolean(this.problem), (el) => el.child(note(this.problem, t.blocked)))
       .when(Boolean(this.usage) && this.usage.available === false, (el) => el.child(note("Plan limits don't apply to this login (an API key or a cloud provider).")))
+      .when(Boolean(this.account), (el) => el.child(this.accountRow(t)))
       .when(!rows.length && this.busy, (el) => el.child(note("Asking Claude Code for your usage…")))
       .when(!rows.length && !this.busy && !this.usage && !this.problem, (el) => el.child(note("Press ↻ to check your Claude usage.")))
       .child(v_flex().id("usage-rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(rows.map((r) => this.row(t, r))));

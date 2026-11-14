@@ -22,6 +22,8 @@ import { agents, spaces, exec, home, readTextFile, run, notify, nextCommand, the
 import { DEMO_GROUPS, DEMO_ADDED, DEMO_PROGRESS, DEMO_OPEN, DEMO_FETCHED_AT } from "./demo.js";
 
 const ICON = (name) => `mods/jira-tickets/icons/${name}.svg`;
+// The title's Jira mark (Simple Icons, CC0), in Jira's blue.
+const JIRA_BLUE = "#2684FF";
 const CHROME = (name) => `mods/workspace-chrome/${name}.svg`;
 const RAIL = 44;
 // A section's height while the panel is a rail: its button, icon and count.
@@ -1107,6 +1109,7 @@ export default class JiraTickets extends View {
           .items_center()
           .border_b(1)
           .border_color(t.border)
+          .child(svg(ICON("jira")).size(13).flex_none().text_color(JIRA_BLUE))
           .child(div().font_medium().child("Jira"))
           .child(div().text_size(11.5).text_color(t.dim).child(this.fetchedAt ? `${open.length} open · ${ago(this.fetchedAt)}` : "not loaded yet"))
           .child(div().flex_1())

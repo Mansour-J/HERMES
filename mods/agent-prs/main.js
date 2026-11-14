@@ -18,6 +18,8 @@ import { agents, terminals, spaces, exec, hc, home, readTextFile, run, notify, n
 import { DEMO_PRS, DEMO_OPEN_REPOS, DEMO_OPEN_PIPELINES } from "./demo.js";
 
 const ICON = (name) => `mods/agent-prs/icons/${name}.svg`;
+// Herdr's own GitHub mark, for the title.
+const GITHUB = "icons/gh.svg";
 const CHROME = (name) => `mods/workspace-chrome/${name}.svg`;
 const RAIL = 44;
 // A section's height while the panel is a rail: its button, icon and count.
@@ -916,6 +918,7 @@ export default class AgentPrs extends View {
           .items_center()
           .border_b(1)
           .border_color(t.border)
+          .child(svg(GITHUB).size(13).flex_none().text_color(t.foreground))
           .child(div().font_medium().child("Pull requests"))
           .child(
             div()
