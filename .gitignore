@@ -1,0 +1,6 @@
+# Herdr writes these into every mod folder itself, on every start.
+gpui-kit.d.ts
+jsconfig.json
+
+# Your settings live in ~/.config/hermes/settings.json. Never here, even by mistake.
+/settings.json

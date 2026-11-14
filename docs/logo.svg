@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="HERMES">
+  <title>HERMES</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b4b"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wing" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#fde68a"/>
+    </linearGradient>
+    <g id="wings">
+      <path d="M96 100 C74 82 48 66 22 60 C36 78 60 96 96 116 Z"/>
+      <path d="M96 120 C76 108 54 100 32 99 C46 113 66 124 96 132 Z"/>
+      <path d="M96 138 C80 132 64 131 48 135 C60 145 76 149 96 150 Z"/>
+    </g>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <rect width="256" height="256" rx="56" fill="url(#glow)"/>
+  <!-- Wings, one each side, like the messenger's winged helmet. -->
+  <use href="#wings" xlink:href="#wings" fill="url(#wing)"/>
+  <use href="#wings" xlink:href="#wings" fill="url(#wing)" transform="translate(256 0) scale(-1 1)"/>
+  <!-- The H. -->
+  <g fill="#ffffff">
+    <rect x="96" y="70" width="24" height="118" rx="6"/>
+    <rect x="136" y="70" width="24" height="118" rx="6"/>
+    <rect x="110" y="117" width="36" height="22" rx="4"/>
+  </g>
+  <!-- A small panel at the H's foot: the side panel this all lives in. -->
+  <rect x="84" y="200" width="88" height="8" rx="4" fill="#ffffff" fill-opacity="0.35"/>
+</svg>

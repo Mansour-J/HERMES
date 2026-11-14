@@ -1,0 +1,28 @@
+{
+  "aws": {
+    "profile": "my-sso-profile",
+    "region": "us-east-1",
+    "account": "123456789012",
+    "codeartifact_domain": "my-domain"
+  },
+  "jira": {
+    "site": "my-company.atlassian.net"
+  },
+  "work": {
+    "repos": "~/projects/work",
+    "space": "work",
+    "notes": "~/notes",
+    "commit_style": "Conventional Commits with the ticket key, e.g. `feat: ABC-123 <short description>`"
+  },
+  "commands": {
+    "plan_note": [
+      "For reference, the commonly used repositories are:",
+      "",
+      "- `web-api` — the API behind the web app.",
+      "- `web-app` — the web app."
+    ],
+    "implement_note": [
+      "For reference, the database migrations are in `database`."
+    ]
+  }
+}
