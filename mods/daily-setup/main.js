@@ -1,4 +1,4 @@
-// Daily: the start-of-day setup that `daily` (~/.aws_aliases) does, as a section of the panel.
+// Daily: the start-of-day setup that `daily` (~/.aws_aliases) does, as buttons in Herdr.
 // Three steps against one AWS profile: sign in (SSO), log Docker in to ECR, and put a
 // CodeArtifact token in ~/.gradle/gradle.properties for Gradle. Run them all, or one.
 //
@@ -12,10 +12,20 @@
 // exported. What comes back here is exit codes, file times and error text, and anything
 // token-shaped is cut from error text before it's shown or saved. The token file is written
 // owner-only (600).
+//
+// Where it sits, by layout props (as Claude usage does):
+// - `bar: true`: a chip in the window's bottom bar, the sunrise, "Daily" and how many steps
+//   are set. A click opens the section in a popup.
+// - `popup: true`: that popup (opened by the chip): the steps, RUN DAILY, ▶, CANCEL and ↻.
+// - neither: a section of the panel's column, folding to a rail with it.
+// The copy in the layout (the chip, or the section) runs and checks the steps and shares where
+// each stands; the popup draws that, and its buttons ask that copy, as commands, to act.
+// `panel: "<column id>"` names the panel whose Refresh all also checks it when it sits outside
+// that column (mods/hermes). The AWS settings (`daily`) go on the block in the layout.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, home, run, notify, nextCommand, theme, layout, props, shared, setShared } from "herdr";
+import { exec, home, run, notify, nextCommand, openOverlay, closeOverlay, theme, layout, props, settings, shared, setShared } from "herdr";
 
 const ICON = (name) => `mods/daily-setup/icons/${name}.svg`;
 const CHROME = (name) => `mods/workspace-chrome/${name}.svg`;
@@ -68,9 +78,31 @@ function find(node, id) {
 
 // The layout node this copy sits in. Its width says rail or list.
 const nodeId = () => props()?.node ?? "daily";
+const inBar = () => Boolean(props()?.bar);
+const isPopup = () => Boolean(props()?.popup);
 // Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
-const busyKey = () => `${nodeId()}.busy.daily-setup`;
+const busyKey = () => `${props()?.panel ?? nodeId()}.busy.daily-setup`;
+// Where the steps stand, as the copy that runs them shares it for the popup; the demo's apart.
+const stateKey = () => `daily-setup.${props()?.demo ? "demo" : "live"}`;
+// The open popup's id, or when the last one closed.
+const POPUP_KEY = "daily-setup.popup";
+
+// How far the chip's block sits from the right end of its row, and how wide it is (in Herdr's
+// px): the blocks after it in the row are fixed-width chips.
+function chipPlace() {
+  const walk = (node) => {
+    const kids = node?.children ?? [];
+    const i = kids.findIndex((c) => c.content?.mod === "daily-setup" && c.content?.props?.bar);
+    if (i >= 0) return { right: kids.slice(i + 1).reduce((sum, c) => sum + (c.size?.px ?? 0), 0), width: kids[i].size?.px ?? 100 };
+    for (const c of kids) {
+      const found = walk(c);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(layout()) ?? { right: 0, width: 100 };
+}
 const tellBusy = (busy) => {
   if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
 };
@@ -187,6 +219,11 @@ trap - EXIT`;
 
 export default class DailySetup extends View {
   init(_props, cx) {
+    // The popup draws what the copy that runs the steps shares; its buttons send that copy
+    // commands. It runs nothing itself.
+    this.running = new Set();
+    if (isPopup()) return;
+    if (inBar()) setShared(POPUP_KEY, null);
     // Each step's last known state: { state: "ok" | "off" | "failed", at, note }.
     this.steps = load("steps", {});
     this.checkedAt = load("checked-at", 0);
@@ -200,25 +237,88 @@ export default class DailySetup extends View {
       this.steps = { sso: { state: "ok" }, ecr: { state: "ok", at }, codeartifact: { state: "ok", at } };
       this.checkedAt = Date.now() - 3 * 60000;
     }
-    // `daily-setup.run`, `.cancel`, `.check` and `.toggle` (keys.json, or `herdr-app do`) are
-    // the buttons. `.refresh` is `.check`, as Refresh all sends it.
+    this.publish();
+    // `daily-setup.run`, `.step:<sso|ecr|codeartifact>`, `.cancel`, `.check`, `.open` (the
+    // chip's popup) and `.toggle` (the section's rail) are the buttons, for keys.json or
+    // `herdr-app do`. `.refresh` is `.check`, as Refresh all sends it.
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        if (command === "run") this.runAll(cx);
-        if (command === "cancel") this.cancel(cx);
-        if (command === "check" || command === "refresh") this.check(cx);
-        if (command === "toggle") toggle();
+        const [verb, arg] = command.split(/[\s:]+/);
+        if (verb === "run") this.runAll(cx);
+        if (verb === "step" && STEPS.some((x) => x.id === arg)) this.runOne(arg, cx);
+        if (verb === "cancel") this.cancel(cx);
+        if (verb === "check" || verb === "refresh") this.check(cx);
+        if (verb === "open" && inBar()) this.togglePopup();
+        if (verb === "toggle" && !inBar()) toggle();
       }
     });
   }
 
+  // Where the steps stand, shared for the popup (and re-shared at every change).
+  publish() {
+    setShared(stateKey(), { steps: this.steps, checkedAt: this.checkedAt, running: [...this.running], checking: this.checking, cancelled: this.cancelled });
+  }
+
+  // A change: shared for the popup, then drawn.
+  changed(cx) {
+    if (!isPopup()) this.publish();
+    cx.notify();
+  }
+
+  // In the popup, what the copy that runs the steps shared.
+  hydrate() {
+    const d = shared(stateKey()) ?? {};
+    this.steps = d.steps ?? {};
+    this.checkedAt = d.checkedAt ?? 0;
+    this.running = new Set(d.running ?? []);
+    this.checking = Boolean(d.checking);
+    this.cancelled = Boolean(d.cancelled);
+  }
+
+  // The chip's popup, standing on the bottom bar centered over the chip (kept inside the
+  // window; the bar runs to its right edge). Closed by Esc, a click beside it, or the chip.
+  openPopup() {
+    const width = 400;
+    // A popup keeps the size it opened with: room for the steps and the line under them.
+    const height = 40 + 8 + STEPS.length * 24 + 40;
+    // Where it goes is in the window's own pixels, as its size is; its size is in Herdr's, which zoom.
+    const zoom = Number(settings()?.zoom) || 1;
+    const v = window.viewport_size?.();
+    const chip = chipPlace();
+    const middle = v?.width - (chip.right + chip.width / 2) * zoom;
+    const at = v?.width
+      ? {
+          x: Math.min(Math.max(8, middle - (width / 2) * zoom), v.width - (width + 8) * zoom),
+          y: Math.max(8, v.height - ((this.barHeight ?? 28) + height + 6) * zoom),
+        }
+      : undefined;
+    const id = openOverlay({ mod: "daily-setup", kind: "popup", width, height, ...(at ? { at } : {}), props: { popup: true, height, daily: props()?.daily ?? {}, demo: props()?.demo ?? false } });
+    setShared(POPUP_KEY, { id });
+  }
+
+  togglePopup() {
+    const p = shared(POPUP_KEY);
+    if (p?.id) {
+      closeOverlay(p.id);
+      setShared(POPUP_KEY, { closedAt: Date.now() });
+    } else if (!(p?.closedAt && Date.now() - p.closedAt < 400)) {
+      // (A click on the chip while the popup is open closes it on the way: don't reopen it.)
+      this.openPopup();
+    }
+  }
+
+  async close() {
+    if (isPopup()) setShared(POPUP_KEY, { closedAt: Date.now() });
+  }
+
   // Reads where each step stands: an STS call, and two files' times.
   check(cx) {
+    if (isPopup()) return run("daily-setup.check");
     if (this.checking || this.running.size || props()?.demo || unset().length) return;
     this.checking = true;
     tellBusy(true);
-    cx.notify();
+    this.changed(cx);
     cx.spawn(async (cx) => {
       const c = config();
       const [sso, ecr, token] = await Promise.all([
@@ -236,7 +336,7 @@ export default class DailySetup extends View {
       save("checked-at", this.checkedAt);
       this.checking = false;
       tellBusy(false);
-      cx.notify();
+      this.changed(cx);
     });
   }
 
@@ -261,7 +361,7 @@ export default class DailySetup extends View {
   async doStep(id, cx) {
     if (id === "sso") this.cancelled = false;
     this.running.add(id);
-    cx.notify();
+    this.changed(cx);
     let result;
     try {
       result = await this.runStep(id);
@@ -278,12 +378,13 @@ export default class DailySetup extends View {
     this.checkedAt = Date.now();
     save("steps", this.steps);
     save("checked-at", this.checkedAt);
-    cx.notify();
+    this.changed(cx);
     return result.ok;
   }
 
   // One step; ECR and CodeArtifact need the sign-in, so it comes first when it's gone.
   runOne(id, cx) {
+    if (isPopup()) return run(`daily-setup.step:${id}`);
     if (this.running.size || props()?.demo || unset().length) return;
     cx.spawn(async (cx) => {
       if (id !== "sso" && !(await this.doStep("sso", cx))) return this.blocked([id], cx);
@@ -293,6 +394,7 @@ export default class DailySetup extends View {
 
   // All of `daily`: sign in, then ECR and CodeArtifact side by side.
   runAll(cx) {
+    if (isPopup()) return run("daily-setup.run");
     if (this.running.size || props()?.demo || unset().length) return;
     cx.spawn(async (cx) => {
       if (!(await this.doStep("sso", cx))) return this.blocked(["ecr", "codeartifact"], cx);
@@ -300,29 +402,30 @@ export default class DailySetup extends View {
       notify(
         ecr && token
           ? { title: "Daily setup done", body: "Signed in, Docker logged in to ECR, CodeArtifact token written.", level: "success" }
-          : { title: "Daily setup didn't finish", body: "See the Daily section for the step that failed.", level: "error" },
+          : { title: "Daily setup didn't finish", body: "Open Daily to see the step that failed.", level: "error" },
       );
     });
   }
 
   // Stops the sign-in that's waiting: the run it belongs to stops there too.
   cancel(cx) {
+    if (isPopup()) return run("daily-setup.cancel");
     this.cancelled = true;
-    cx.notify();
+    this.changed(cx);
     cx.spawn(async (cx) => {
       const stopped = await stopSignIn(config());
       if (!stopped && !this.running.has("sso")) notify({ title: "No AWS sign-in to cancel", body: "None that this window started is waiting.", level: "info" });
-      cx.notify();
+      this.changed(cx);
     });
   }
 
   blocked(ids, cx) {
     // Cancelled: nothing failed, so the steps that waited on the sign-in keep their state.
-    if (this.cancelled) return cx.notify();
+    if (this.cancelled) return this.changed(cx);
     for (const id of ids) this.steps[id] = { ...(this.steps[id] ?? {}), state: "failed", note: "needs the AWS sign-in" };
     save("steps", this.steps);
     notify({ title: "AWS sign-in didn't complete", body: this.steps.sso?.note ?? "", level: "error" });
-    cx.notify();
+    this.changed(cx);
   }
 
   // Where a step stands now: its glyph state and a few words.
@@ -432,9 +535,51 @@ export default class DailySetup extends View {
       );
   }
 
+  // The chip in the bottom bar: the sunrise, "Daily" and how many steps are set.
+  chip(t) {
+    const ok = STEPS.filter((s) => this.view(s.id).state === "pass").length;
+    const [word, color] = this.summary(t);
+    const busy = this.running.size > 0 || this.checking;
+    const open = Boolean(shared(POPUP_KEY)?.id);
+    return h_flex()
+      .id("daily-setup")
+      .on_size_change((size) => {
+        this.barHeight = size.height;
+      })
+      .size_full()
+      .justify_end()
+      .items_center()
+      .bg(t.chrome)
+      .border_t(1)
+      .border_color(t.border)
+      .text_size(11.8)
+      .child(
+        h_flex()
+          .id("daily-chip")
+          .h(20)
+          .px(7)
+          .gap(6)
+          .items_center()
+          .rounded(5)
+          .text_color(open ? t.foreground : t.muted)
+          .when(open, (el) => el.bg(t.hover))
+          .cursor_pointer()
+          .hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .tooltip(`Daily setup: ${word}${this.checkedAt ? `, checked ${ago(this.checkedAt)}` : ""}. Click for the steps.`)
+          .on_click(() => this.togglePopup())
+          .child(svg(ICON("sunrise")).size(13).flex_none().text_color(SUNRISE))
+          .child("Daily")
+          .when(busy, (el) => el.child(svg(CHROME("spinner")).size(10).flex_none().text_color(t.working).spin(900)))
+          .when(!busy && !unset().length, (el) => el.child(div().font_medium().text_color(color).child(`${ok}/${STEPS.length}`))),
+      );
+  }
+
   render(cx) {
     const t = theme();
-    if (narrow()) return this.rail(t);
+    if (inBar()) return this.chip(t);
+    const popup = isPopup();
+    if (popup) this.hydrate();
+    if (!popup && narrow()) return this.rail(t);
     const [word, color] = this.summary(t);
     const missing = unset();
     const busy = this.running.size > 0 || missing.length > 0;
@@ -442,7 +587,9 @@ export default class DailySetup extends View {
       .id("daily-setup")
       .size_full()
       .min_h(0)
-      .when(!framed(), (el) => el.rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border))
+      // A popup is as tall as what's in it, so it's given its height.
+      .when(popup, (el) => el.h(props()?.height ?? 170).bg(t.popover ?? t.background))
+      .when(!popup && !framed(), (el) => el.rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border))
       .text_color(t.foreground)
       .text_size(13)
       .child(
@@ -515,7 +662,7 @@ export default class DailySetup extends View {
               this.checking,
             ),
           )
-          .child(this.button(t, "collapse", CHROME("panel-right"), "Collapse", toggle)),
+          .when(!popup, (el) => el.child(this.button(t, "collapse", CHROME("panel-right"), "Collapse", toggle))),
       )
       .when(missing.length > 0, (el) =>
         el.child(
@@ -530,6 +677,17 @@ export default class DailySetup extends View {
       .when(!missing.length, (el) => el.child(v_flex().py(4).children(STEPS.map((s) => this.stepRow(t, s)))))
       .when(this.running.has("sso"), (el) =>
         el.child(div().px(14).pb(6).text_size(11).text_color(t.working).child("Approve the AWS sign-in in your browser; it may open behind this window. If it failed there, press Cancel and run again.")),
+      )
+      .when(popup && !missing.length && !this.running.has("sso"), (el) =>
+        el.child(
+          div()
+            .px(14)
+            .pt(2)
+            .pb(8)
+            .text_size(11)
+            .text_color(t.dim)
+            .child(this.checkedAt ? `Checked ${ago(this.checkedAt)}. An ECR login and a CodeArtifact token last 12 hours.` : "Not checked yet: press ↻ to see where each step stands."),
+        ),
       );
   }
 }

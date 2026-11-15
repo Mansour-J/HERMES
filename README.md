@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/panel.png" width="440" alt="The HERMES panel: Daily, Claude, Pull requests and Jira sections">
+  <img src="docs/screenshots/panel.png" width="440" alt="The HERMES panel: Pull requests and Jira under the HERMES bar, and Daily and Claude usage in the bottom bar">
 </p>
 
 > Hermes carried messages for the gods. This one carries them between my agents, GitHub, Jira, AWS and Claude, and never fetches anything until I ask.
@@ -26,31 +26,41 @@
 
 | | Section | What it does |
 |---|---|---|
-| 🌅 | **Daily** | My start-of-day setup as buttons: AWS sign-in, Docker login to ECR, CodeArtifact token. Each step counts down until it expires. |
-| 📊 | **Claude** | Which Claude account is signed in, and its plan usage as `/usage` shows it: session, week, per-model limits, each with when it resets. |
+| 🌅 | **Daily** | In the window's bottom bar: how many of my start-of-day steps are set, and a click away, the steps as buttons (AWS sign-in, Docker login to ECR, CodeArtifact token), each counting down until it expires. |
+| 📊 | **Claude usage** | In the window's bottom bar: the session's share at a glance, and a click away, which Claude account is signed in and its plan usage as `/usage` shows it (session, week, per-model limits, each with when it resets). |
 | 🔀 | **Pull requests** | Every open PR of mine, grouped by repository: where each stands, its pipeline, and buttons to merge, mark ready, update, re-run or close it. |
 | 🎫 | **Jira** | My sprint, next sprint and backlog, each ticket with a plan → implement → PR → merged progress bar and buttons that start the work. |
-| 🗂️ | **One panel** | All four stacked in one framed column under a bar with **REFRESH ALL**, folding to a slim rail of icons and counts. |
+| 🗂️ | **One panel** | Pull requests and Jira stacked in one framed column under a bar with **REFRESH ALL** (which checks Daily and Claude usage in the bottom bar too), folding to a slim rail of icons and counts. |
 | 🔒 | **Safe by design** | No secret ever reaches the panel's code. Nothing runs, fetches or refreshes until you press a button. |
 
 ### 🌅 Daily
 
-What my `daily` shell function does, without the terminal.
+<img src="docs/screenshots/daily.png" width="440" align="right" alt="Daily: the chip in the bottom bar, and its popup with the three steps, RUN DAILY and the check button">
+
+What my `daily` shell function does, without the terminal. It lives in the window's bottom bar: the sunrise, **Daily**, and how many of the three steps are set (green when all are, amber when one needs a run, red when one failed; a spinner while it works). Click it, or run `daily-setup.open`, for a popup with the steps:
 
 - **RUN DAILY** signs in to AWS SSO, then logs Docker in to ECR and writes a fresh CodeArtifact token to `~/.gradle/gradle.properties`, side by side.
 - **▶ on a step** runs just that step, signing in first if it's needed.
 - **Countdowns.** The ECR login and the token each show how long they have left (12 hours from when they were made).
 - **Cancel.** If the browser sign-in fails or is closed, **CANCEL** stops the waiting sign-in, so a run never hangs for its 10 minutes. It only stops a sign-in the panel started, never one in a terminal.
+- **↻** checks where each step stands, and so does the panel's **REFRESH ALL**. The chip and the popup always show the same: a run keeps going, and keeps the chip up to date, with the popup closed.
 
-### 📊 Claude
+<br clear="right">
 
-<img src="docs/screenshots/daily-claude.png" width="440" align="right" alt="The Daily and Claude sections">
+### 📊 Claude usage
+
+<img src="docs/screenshots/claude-usage.png" width="440" align="right" alt="Claude usage: the chip in the bottom bar, and its popup with the account and the limits">
+
+It lives in the window's bottom bar, at the right: the Claude mark, **Usage**, and how much of the session you've used (amber from 80%, red at 100%). Click it, or run `claude-usage.open`, for a popup with:
 
 - **The account** Claude Code is signed in with: its email, organization and plan. Hover it for when the sign-in ends.
 - **Session**, **week (all models)** and **any model's own weekly limit**, each as a bar with its percentage and when it resets.
 - Bars turn amber from 80% and red at 100%.
 - It asks Claude Code itself (its `get_usage` request, and `claude auth status` for the account). No prompt is sent, so no model runs and it costs nothing, and the panel never touches your login.
 - Reset times count down between checks. A window that has reset says so.
+- **↻** in the popup checks again, and so does the panel's **REFRESH ALL**: the chip spins while it checks, and the chip and popup show the new numbers together.
+
+Either chip can go back in the panel as a section of its own: move its block into the `work-side` column of the layout, without the `bar` prop.
 
 <br clear="right">
 
@@ -106,9 +116,9 @@ My tickets in the **current sprint**, the **next sprint** and the **backlog**, r
 
 <img src="docs/screenshots/rail.png" width="55" align="left" alt="The panel folded to a rail">
 
-The bar at the top has **REFRESH ALL**: it presses every section's own refresh at once, so each section's ↻ spins as if you'd clicked it, and the bar reads *Refreshing…* until the last one is done. Each ↻ still refreshes just its own section.
+The bar at the top has **REFRESH ALL**: it presses every section's own refresh at once, and Daily's and Claude usage's in the bottom bar too, so each one's ↻ (or chip) spins as if you'd clicked it, and the bar reads *Refreshing…* until the last one is done. Each ↻ still refreshes just its own. (A block elsewhere in the layout joins in by naming the panel: layout prop `"panel": "work-side"`.)
 
-The panel button at the top right of any section folds the whole panel to a 44px rail. Each section keeps its icon and a count there: steps done, session used, open PRs, open tickets. Unfold it and every section gets its height back.
+The panel button at the top right of any section folds the whole panel to a 44px rail. Each section keeps its icon and a count there: open PRs, open tickets. Unfold it and every section gets its height back.
 
 The panel's frame, dividers and rounded corners come from the layout, not the mods.
 
@@ -121,8 +131,8 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 | Command | Does |
 |---|---|
 | `hermes.refresh` | refresh every section at once (REFRESH ALL) |
-| `daily-setup.run` · `.cancel` · `.check` | run everything · stop a waiting sign-in · check where each step stands (`.refresh` too) |
-| `claude-usage.refresh` | check Claude usage |
+| `daily-setup.run` · `.step:<sso\|ecr\|codeartifact>` · `.cancel` · `.check` · `.open` | run everything · run one step · stop a waiting sign-in · check where each step stands (`.refresh` too) · open or close its popup |
+| `claude-usage.refresh` · `.open` | check Claude usage · open or close its popup |
 | `agent-prs.refresh` | load open PRs |
 | `agent-prs.act:<action>:<number>` | press a PR's button: `ready`, `merge`, `auto-merge`, `cancel-auto-merge`, `update-branch`, `rerun-failed`, `draft`, `close` (`owner/repo#number` if two repositories share the number). A button that's off says why, as a click on it does. |
 | `jira-tickets.refresh` | load tickets |
@@ -179,12 +189,12 @@ Herdr keeps each section's saved state per set of layout props, so changing a se
 ```
 mods/
   hermes/          the bar: the HERMES mark and REFRESH ALL
-  daily-setup/     🌅 Daily: the `daily` shell function as buttons
-  claude-usage/    📊 Claude: plan usage
+  daily-setup/     🌅 Daily: the `daily` shell function as buttons, in the bottom bar's chip and its popup
+  claude-usage/    📊 Claude usage: the bottom bar's chip and its popup
   agent-prs/       🔀 Pull requests
   jira-tickets/    🎫 Jira
 layouts/
-  main-prs.json    the window: Herdr's `main` layout plus the panel (`work-side`)
+  main-prs.json    the window: Herdr's `main` layout plus the panel (`work-side`), and Daily and Claude usage in the bottom bar
 claude/commands/   /mansour-plan and /mansour-implement, the commands the Jira buttons run
 docs/              the logo, screenshots, and the demo layout they're taken from
 settings.example.json   what ~/.config/hermes/settings.json holds

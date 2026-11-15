@@ -12,10 +12,20 @@
 //
 // Nothing refreshes by itself: press ↻. Between checks the reset times count down, and a
 // window that has reset since is shown as such.
+//
+// Where it sits, by layout props:
+// - `bar: true`: a chip in the window's bottom bar, the Claude mark and "Usage" with the
+//   session's share. A click opens the rest in a popup.
+// - `popup: true`: that popup (opened by the chip): the account, every limit and ↻.
+// - neither: a section of the panel's column, folding to a rail with it.
+// The copy in the layout (the chip, or the section) does the checking and keeps the answer;
+// it shares what it has, so the popup shows the same and its ↻ asks that copy to check.
+// `panel: "<column id>"` names the panel whose Refresh all also refreshes it when it sits
+// outside that column (mods/hermes).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, home, run, nextCommand, theme, layout, props, shared, setShared } from "herdr";
+import { exec, home, run, nextCommand, openOverlay, closeOverlay, theme, layout, props, settings, shared, setShared } from "herdr";
 
 const ICON = (name) => `mods/claude-usage/icons/${name}.svg`;
 const CHROME = (name) => `mods/workspace-chrome/${name}.svg`;
@@ -42,9 +52,15 @@ function find(node, id) {
 
 // The layout node this copy sits in. Its width says rail or list.
 const nodeId = () => props()?.node ?? "claude-usage";
+const inBar = () => Boolean(props()?.bar);
+const isPopup = () => Boolean(props()?.popup);
 // Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
-const busyKey = () => `${nodeId()}.busy.claude-usage`;
+const busyKey = () => `${props()?.panel ?? nodeId()}.busy.claude-usage`;
+// What the checking copy knows, for the popup; the demo's apart from the real one.
+const stateKey = () => `claude-usage.${props()?.demo ? "demo" : "live"}`;
+// The open popup's id, or when the last one closed.
+const POPUP_KEY = "claude-usage.popup";
 const tellBusy = (busy) => {
   if (shared(busyKey()) !== busy) setShared(busyKey(), busy);
 };
@@ -174,6 +190,9 @@ function rowsOf(answer) {
 
 export default class ClaudeUsage extends View {
   init(_props, cx) {
+    // The popup shows what the checking copy shares; it checks nothing itself.
+    if (isPopup()) return;
+    if (inBar()) setShared(POPUP_KEY, null);
     // The last answer, so the section has something to show the moment Herdr starts.
     this.usage = load("usage", null); // { plan, available, rows }
     this.checkedAt = load("checked-at", 0);
@@ -196,21 +215,69 @@ export default class ClaudeUsage extends View {
       this.checkedAt = Date.now() - 2 * 60000;
       this.account = { signedIn: true, email: "ada@olympus.dev", org: "Olympus Engineering", plan: "team", method: "claude.ai", provider: "firstParty", endsAt: later(9 * 1440) };
     }
-    // `claude-usage.refresh` and `.toggle` (keys.json, or `herdr-app do`) are the buttons.
+    this.publish();
+    // `claude-usage.refresh`, `.open` (the chip's popup) and `.toggle` (the section's rail)
+    // are the buttons, for keys.json or `herdr-app do`.
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
         if (command === "refresh") this.refresh(cx);
-        if (command === "toggle") toggle();
+        if (command === "toggle" && !inBar()) toggle();
+        if (command === "open" && inBar()) this.togglePopup();
       }
     });
   }
 
+  // What this copy knows, shared for the popup (and re-shared at every change).
+  publish() {
+    setShared(stateKey(), { usage: this.usage, checkedAt: this.checkedAt, account: this.account, busy: this.busy, problem: this.problem });
+  }
+
+  // What to draw from: this copy's own, or, in the popup, what the checking copy shared.
+  data() {
+    return isPopup() ? shared(stateKey()) ?? {} : this;
+  }
+
+  // The chip's popup, standing on the bottom bar at the window's right edge, over the chip.
+  // Closed by Esc, a click beside it, or the chip.
+  openPopup() {
+    const d = this.data();
+    // A popup keeps the size it opened with, so it has room for the account and at least three
+    // limits even before the first check (that answer arrives while it's open).
+    const rows = Math.max(3, d.usage?.rows?.length ?? 0);
+    const width = 400;
+    const height = 40 + 54 + rows * 26 + 14 + (d.problem || !d.usage ? 34 : 0);
+    // Where it goes is in the window's own pixels, as its size is; its size is in Herdr's,
+    // which zoom. At the pointer instead, it would get only the little room below the bar.
+    const zoom = Number(settings()?.zoom) || 1;
+    const v = window.viewport_size?.();
+    const at = v?.width ? { x: Math.max(8, v.width - (width + 8) * zoom), y: Math.max(8, v.height - ((this.barHeight ?? 28) + height + 6) * zoom) } : undefined;
+    const id = openOverlay({ mod: "claude-usage", kind: "popup", width, height, ...(at ? { at } : {}), props: { popup: true, height, demo: props()?.demo ?? false } });
+    setShared(POPUP_KEY, { id });
+  }
+
+  togglePopup() {
+    const p = shared(POPUP_KEY);
+    if (p?.id) {
+      closeOverlay(p.id);
+      setShared(POPUP_KEY, { closedAt: Date.now() });
+    } else if (!(p?.closedAt && Date.now() - p.closedAt < 400)) {
+      // (A click on the chip while the popup is open closes it on the way: don't reopen it.)
+      this.openPopup();
+    }
+  }
+
+  async close() {
+    if (isPopup()) setShared(POPUP_KEY, { closedAt: Date.now() });
+  }
+
   refresh(cx) {
+    if (isPopup()) return;
     if (this.busy || props()?.demo) return;
     this.busy = true;
     tellBusy(true);
     this.problem = null;
+    this.publish();
     cx.notify();
     cx.spawn(async (cx) => {
       // The account is looked up alongside; if that fails, the last one known stays.
@@ -249,6 +316,7 @@ export default class ClaudeUsage extends View {
       }
       this.busy = false;
       tellBusy(false);
+      this.publish();
       cx.notify();
     });
   }
@@ -315,8 +383,7 @@ export default class ClaudeUsage extends View {
   }
 
   // The signed-in account: email over organization, and the plan.
-  accountRow(t) {
-    const a = this.account;
+  accountRow(t, a) {
     if (!a.signedIn)
       return div().px(14).pt(8).pb(2).text_size(12).text_color(t.blocked).child("Claude Code isn't signed in: run `claude auth login`.");
     const plan = a.plan ?? (a.provider && a.provider !== "firstParty" ? a.provider : "API key");
@@ -355,8 +422,8 @@ export default class ClaudeUsage extends View {
       );
   }
 
-  session() {
-    return this.usage?.rows?.find((r) => r.kind === "session") ?? this.usage?.rows?.[0] ?? null;
+  session(d = this.data()) {
+    return d.usage?.rows?.find((r) => r.kind === "session") ?? d.usage?.rows?.[0] ?? null;
   }
 
   rail(t) {
@@ -385,19 +452,67 @@ export default class ClaudeUsage extends View {
       );
   }
 
-  render(cx) {
-    const t = theme();
-    if (narrow()) return this.rail(t);
-    const rows = this.usage?.rows ?? [];
+  // The chip in the bottom bar: the Claude mark, "Usage" and the session's share.
+  chip(t) {
     const s = this.session();
     const fresh = s && !(s.resetsAt && s.resetsAt <= Date.now());
-    const summary = !this.checkedAt ? "not checked yet" : `${fresh ? `${Math.round(s.percent)}% of session · ` : ""}${ago(this.checkedAt)}`;
+    const open = Boolean(shared(POPUP_KEY)?.id);
+    return h_flex()
+      .id("claude-usage")
+      .on_size_change((size) => {
+        this.barHeight = size.height;
+      })
+      .size_full()
+      .pr(10)
+      .justify_end()
+      .items_center()
+      .bg(t.chrome)
+      .border_t(1)
+      .border_color(t.border)
+      .text_size(11.8)
+      .child(
+        h_flex()
+          .id("usage-chip")
+          .h(20)
+          .px(7)
+          .gap(6)
+          .items_center()
+          .rounded(5)
+          .text_color(open ? t.foreground : t.muted)
+          .when(open, (el) => el.bg(t.hover))
+          .cursor_pointer()
+          .hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .tooltip(
+            `Claude usage${fresh ? `: ${Math.round(s.percent)}% of this session` : ""}${this.checkedAt ? `, checked ${ago(this.checkedAt)}` : ", not checked yet"}. Click for your account and every limit.`,
+          )
+          .on_click(() => this.togglePopup())
+          .child(svg(CLAUDE).size(13).flex_none().text_color(CLAUDE_ORANGE))
+          .child("Usage")
+          .when(this.busy, (el) => el.child(svg(ICON("refresh")).size(11).flex_none().text_color(t.dim).spin(900)))
+          .when(!this.busy && Boolean(fresh), (el) => el.child(div().font_medium().text_color(this.color(t, s)).child(`${Math.round(s.percent)}%`))),
+      );
+  }
+
+  render(cx) {
+    const t = theme();
+    if (inBar()) return this.chip(t);
+    const popup = isPopup();
+    if (!popup && narrow()) return this.rail(t);
+    const d = this.data();
+    const rows = d.usage?.rows ?? [];
+    const s = this.session(d);
+    const fresh = s && !(s.resetsAt && s.resetsAt <= Date.now());
+    const summary = !d.checkedAt ? "not checked yet" : `${fresh ? `${Math.round(s.percent)}% of session · ` : ""}${ago(d.checkedAt)}`;
     const note = (text, color = t.dim) => div().px(14).py(6).text_size(12).text_color(color).child(text);
+    // In the popup ↻ asks the checking copy (the chip) to check; it shares the answer back.
+    const check = popup ? () => run("claude-usage.refresh") : (_e, cx) => this.refresh(cx);
     return v_flex()
       .id("claude-usage")
       .size_full()
       .min_h(0)
-      .when(!framed(), (el) => el.rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border))
+      // A popup is as tall as what's in it, so it's given its height (the limits fill the rest).
+      .when(popup, (el) => el.h(props()?.height ?? 220).bg(t.popover ?? t.background))
+      .when(!popup && !framed(), (el) => el.rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border))
       .text_color(t.foreground)
       .text_size(13)
       .child(
@@ -411,13 +526,13 @@ export default class ClaudeUsage extends View {
           .border_b(1)
           .border_color(t.border)
           .child(svg(CLAUDE).size(13).flex_none().text_color(CLAUDE_ORANGE))
-          .child(div().font_medium().child("Claude"))
+          .child(div().font_medium().child(popup ? "Claude usage" : "Claude"))
           .child(
             div()
               .id("usage-summary")
               .text_size(11.5)
               .text_color(t.dim)
-              .tooltip(this.usage?.plan ? `Your ${cap(this.usage.plan)} plan's limits, as /usage shows them.` : "Your Claude plan's limits, as /usage shows them.")
+              .tooltip(d.usage?.plan ? `Your ${cap(d.usage.plan)} plan's limits, as /usage shows them.` : "Your Claude plan's limits, as /usage shows them.")
               .child(summary),
           )
           .child(div().flex_1())
@@ -426,18 +541,18 @@ export default class ClaudeUsage extends View {
               t,
               "refresh",
               ICON("refresh"),
-              `${this.checkedAt ? `Checked ${ago(this.checkedAt)}. ` : ""}Check now (asks Claude Code; no model call, nothing spent)`,
-              (_e, cx) => this.refresh(cx),
-              this.busy,
+              `${d.checkedAt ? `Checked ${ago(d.checkedAt)}. ` : ""}Check now (asks Claude Code; no model call, nothing spent)`,
+              check,
+              Boolean(d.busy),
             ),
           )
-          .child(this.button(t, "collapse", CHROME("panel-right"), "Collapse", toggle)),
+          .when(!popup, (el) => el.child(this.button(t, "collapse", CHROME("panel-right"), "Collapse", toggle))),
       )
-      .when(Boolean(this.problem), (el) => el.child(note(this.problem, t.blocked)))
-      .when(Boolean(this.usage) && this.usage.available === false, (el) => el.child(note("Plan limits don't apply to this login (an API key or a cloud provider).")))
-      .when(Boolean(this.account), (el) => el.child(this.accountRow(t)))
-      .when(!rows.length && this.busy, (el) => el.child(note("Asking Claude Code for your usage…")))
-      .when(!rows.length && !this.busy && !this.usage && !this.problem, (el) => el.child(note("Press ↻ to check your Claude usage.")))
+      .when(Boolean(d.problem), (el) => el.child(note(d.problem, t.blocked)))
+      .when(Boolean(d.usage) && d.usage.available === false, (el) => el.child(note("Plan limits don't apply to this login (an API key or a cloud provider).")))
+      .when(Boolean(d.account), (el) => el.child(this.accountRow(t, d.account)))
+      .when(!rows.length && Boolean(d.busy), (el) => el.child(note("Asking Claude Code for your usage…")))
+      .when(!rows.length && !d.busy && !d.usage && !d.problem, (el) => el.child(note("Press ↻ to check your Claude usage.")))
       .child(v_flex().id("usage-rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().children(rows.map((r) => this.row(t, r))));
   }
 }

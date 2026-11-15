@@ -1,9 +1,11 @@
 // The panel's bar: the HERMES mark and Refresh all, at the top of the panel's column.
 //
 // Refresh all presses every section's own refresh: it sends `<mod>.refresh` to each mod in
-// the column (Daily's is its check), so each section's ↻ spins as it would on its own click,
-// and this button spins until the last of them is done. Each section says whether it's
-// refreshing in shared state (`<column>.busy.<mod>`); this mod only reads that.
+// the column (Daily's is its check), and to any mod elsewhere in the layout that names this
+// column as its panel (layout prop `panel`, like Claude usage's chip in the bottom bar). So
+// each section's ↻ spins as it would on its own click, and this button spins until the last
+// of them is done. Each section says whether it's refreshing in shared state
+// (`<column>.busy.<mod>`); this mod only reads that.
 //
 // Like every refresh in the panel, it runs only when pressed.
 
@@ -31,8 +33,15 @@ const narrow = () => (width() ?? Infinity) < 160;
 // When the layout frames this node itself (a border on it), the mod draws no card of its own.
 const framed = () => Boolean(find(layout(), nodeId())?.border);
 
-// The other sections in the column, by mod, in their order.
-const sections = () => [...new Set((find(layout(), nodeId())?.children ?? []).map((c) => c.content?.mod).filter((m) => m && m !== MOD))];
+// Every block in the layout.
+const blocks = (node) => (node?.type === "block" ? [node] : (node?.children ?? []).flatMap(blocks));
+// The other sections in the column, by mod, in their order, then the mods elsewhere that
+// name this column as their panel.
+const sections = () => {
+  const inColumn = (find(layout(), nodeId())?.children ?? []).map((c) => c.content?.mod);
+  const elsewhere = blocks(layout()).filter((b) => b.content?.props?.panel === nodeId()).map((b) => b.content.mod);
+  return [...new Set([...inColumn, ...elsewhere].filter((m) => m && m !== MOD))];
+};
 const refreshing = () => sections().filter((m) => shared(`${nodeId()}.busy.${m}`) === true);
 
 function load(key, fallback) {
@@ -76,7 +85,7 @@ export default class Hermes extends View {
   tip(busy) {
     if (busy.length) return `Refreshing ${busy.length} of ${sections().length} sections…`;
     const last = this.lastAll ? ` Last done ${ago(this.lastAll)}.` : "";
-    return `Refresh every section at once: Daily's check, Claude usage, pull requests and Jira (a short Claude run). Each section's own ↻ still refreshes just that one.${last}`;
+    return `Refresh every section at once: Daily's check, pull requests, Jira (a short Claude run) and Claude usage. Each section's own ↻ still refreshes just that one.${last}`;
   }
 
   rail(t, busy) {

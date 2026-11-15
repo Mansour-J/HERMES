@@ -178,36 +178,6 @@
                   }
                 },
                 {
-                  "id": "demo-daily",
-                  "type": "block",
-                  "size": {
-                    "px": 150
-                  },
-                  "min": 84,
-                  "content": {
-                    "mod": "daily-setup",
-                    "props": {
-                      "node": "work-side",
-                      "demo": true
-                    }
-                  }
-                },
-                {
-                  "id": "demo-claude",
-                  "type": "block",
-                  "size": {
-                    "px": 176
-                  },
-                  "min": 84,
-                  "content": {
-                    "mod": "claude-usage",
-                    "props": {
-                      "node": "work-side",
-                      "demo": true
-                    }
-                  }
-                },
-                {
                   "id": "demo-prs",
                   "type": "block",
                   "size": {
@@ -254,14 +224,51 @@
           "gap": 8
         },
         {
-          "id": "status",
-          "type": "block",
-          "content": {
-            "mod": "workspace-status"
-          },
+          "id": "status-row",
+          "type": "row",
           "size": {
             "px": 28
-          }
+          },
+          "resizable": false,
+          "children": [
+            {
+              "id": "status",
+              "type": "block",
+              "content": {
+                "mod": "workspace-status"
+              }
+            },
+            {
+              "id": "demo-daily-chip",
+              "type": "block",
+              "size": {
+                "px": 100
+              },
+              "content": {
+                "mod": "daily-setup",
+                "props": {
+                  "bar": true,
+                  "panel": "work-side",
+                  "demo": true
+                }
+              }
+            },
+            {
+              "id": "demo-usage",
+              "type": "block",
+              "size": {
+                "px": 120
+              },
+              "content": {
+                "mod": "claude-usage",
+                "props": {
+                  "bar": true,
+                  "panel": "work-side",
+                  "demo": true
+                }
+              }
+            }
+          ]
         }
       ],
       "resizable": false
