@@ -445,6 +445,8 @@ export default class AgentPrs extends View {
     this.problem = null;
     // PR url → the action running on it; the action waiting on the confirm dialog.
     this.acting = new Map();
+    // PR urls being read again by their own ↻.
+    this.rereading = new Set();
     this.pending = null;
     // Screenshots (layout prop `demo`: `true`, or a scene's name in demo.js): made-up data,
     // and nothing runs.
@@ -914,6 +916,7 @@ export default class AgentPrs extends View {
     const [repo, num] = which.includes("#") ? which.split("#") : [null, which];
     const found = this.prs.filter((x) => String(x.number) === num && (!repo || x.repo === repo));
     if (found.length !== 1) return notify({ title: found.length ? `More than one #${num}: say which, as owner/repo#${num}` : `No open PR ${which} here`, level: "error" });
+    if (id === "refresh") return this.refreshOne(found[0], cx);
     const a = this.actionsFor(found[0]).find((x) => x.id === id);
     if (!a) return notify({ title: `#${num} has no ${id} now`, body: `It has: ${this.actionsFor(found[0]).filter((x) => !x.disabled).map((x) => x.id).join(", ")}.`, level: "error" });
     this.act(found[0], a, cx);
@@ -962,14 +965,56 @@ export default class AgentPrs extends View {
 
   // The one PR again, straight from its repository (the search can lag behind a merge): kept
   // up to date while it's open, gone once it's merged or closed.
+  // Answers { ok }, { gone: "merged" | "closed" }, or { error }.
   async reread(p) {
     const [owner, name] = p.repo.split("/");
     const r = await exec("gh", ["api", "graphql", "-f", `query=${ONE}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `n=${p.number}`], { timeout: 60000 });
-    if (r.code !== 0) return;
+    if (r.code !== 0) return { error: lines(r.stderr)[0] ?? `gh exited ${r.code}` };
     const node = JSON.parse(r.stdout)?.data?.repository?.pullRequest;
-    if (!node) return;
+    if (!node) return { error: "GitHub didn't find it." };
     this.prs = node.state === "OPEN" ? this.prs.map((x) => (x.url === p.url ? shape(node) : x)) : this.prs.filter((x) => x.url !== p.url);
     save("open-prs-v3", this.prs);
+    return node.state === "OPEN" ? { ok: true } : { gone: node.state.toLowerCase() };
+  }
+
+  // A card's ↻: that one PR read again (one small GitHub query, about 1 API point): its checks,
+  // reviews, threads, merge state and what you can do to it. The rest of the list stays.
+  refreshOne(p, cx) {
+    // Screenshots (layout prop `demo`): nothing runs.
+    if (props()?.demo) return notify({ title: `Refreshed #${p.number}`, body: "Demo mode: nothing ran.", level: "info" });
+    if (this.rereading.has(p.url) || this.acting.has(p.url)) return;
+    this.rereading.add(p.url);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await this.reread(p).catch((e) => ({ error: String(e?.message ?? e) }));
+      if (r.error) notify({ title: `Couldn't refresh #${p.number}`, body: r.error.slice(0, 200), level: "error" });
+      if (r.gone) notify({ title: `#${p.number} is ${r.gone} now`, body: `${p.title} left the list.`, level: "info" });
+      this.rereading.delete(p.url);
+      cx.notify();
+    });
+  }
+
+  // The card's ↻, at the foot beside Close.
+  refreshButton(t, p) {
+    const busy = this.rereading.has(p.url);
+    const off = busy || this.acting.has(p.url);
+    const glyph = svg(ICON("refresh")).size(12);
+    return div()
+      .id(`reread-${p.repo}-${p.number}`)
+      .size(22)
+      .flex_none()
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded(5)
+      .text_color(busy ? t.working : t.dim)
+      .when(!off, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
+      .tooltip(busy ? `Refreshing #${p.number}…` : `Refresh just #${p.number}: its checks, reviews, merge state and buttons`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.refreshOne(p, cx);
+      })
+      .child(busy ? glyph.spin(900) : glyph);
   }
 
   // The next step is filled, the others outlined, and Close is quiet until hovered. A button
@@ -1090,6 +1135,7 @@ export default class AgentPrs extends View {
           .bg(alpha(t.hover, "66"))
           .children(actions.filter((a) => a !== close).map((a) => this.actionButton(t, p, a)))
           .child(div().flex_1())
+          .child(this.refreshButton(t, p))
           .when(Boolean(close), (el) => el.child(this.actionButton(t, p, close))),
       );
   }

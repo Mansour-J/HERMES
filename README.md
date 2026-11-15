@@ -76,7 +76,7 @@ Each PR is a card. Click it to open the PR on GitHub. It has:
 - **where it stands**, in one line: what's in its way first (conflicts, failing checks, change requests, open threads, behind its base, needs approval, checks running, only a maintainer can merge it), or else draft, auto-merging, or ready to merge. 💬 comments, 👍 approvals and auto-merge sit at its end.
 - **a pipeline bar**: one segment per workflow, sized by its checks. Click it to open the stages, with their durations and every failing check linked to its log.
 - **an agent icon** when an agent in Herdr's Agents list opened or pushed the PR. Click it to jump to that agent.
-- **action buttons** along its foot (see below).
+- **action buttons** along its foot (see below), and **↻** beside Close, which reads just that PR again: its checks, reviews, threads, merge state and buttons, in one small query (about 1 API point), without reloading the list. If it was merged or closed meanwhile, it says so and leaves the list.
 
 <br clear="right">
 
@@ -134,7 +134,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 | `daily-setup.run` · `.step:<sso\|ecr\|codeartifact>` · `.cancel` · `.check` · `.open` | run everything · run one step · stop a waiting sign-in · check where each step stands (`.refresh` too) · open or close its popup |
 | `claude-usage.refresh` · `.open` | check Claude usage · open or close its popup |
 | `agent-prs.refresh` | load open PRs |
-| `agent-prs.act:<action>:<number>` | press a PR's button: `ready`, `merge`, `auto-merge`, `cancel-auto-merge`, `update-branch`, `rerun-failed`, `draft`, `close` (`owner/repo#number` if two repositories share the number). A button that's off says why, as a click on it does. |
+| `agent-prs.act:<action>:<number>` | press a PR's button: `ready`, `merge`, `auto-merge`, `cancel-auto-merge`, `update-branch`, `rerun-failed`, `draft`, `close`, or `refresh` (its ↻) (`owner/repo#number` if two repositories share the number). A button that's off says why, as a click on it does. |
 | `jira-tickets.refresh` | load tickets |
 | `jira-tickets.expand-all` · `.collapse-all` | open or fold every ticket |
 | `jira-tickets.add:<KEY>` · `.remove:<KEY>` | add or remove a ticket by hand |
@@ -142,7 +142,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 
 ## 🔒 Security
 
-- **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻, REFRESH ALL or a run button.
+- **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻ (a section's, or a PR's), REFRESH ALL or a run button.
 - **Nothing changes on GitHub unless you press it.** A PR's buttons run `gh` as you, and only the ones GitHub says you may use are offered: Merge stays off unless the PR can merge and you can write to its repository. Merging, auto-merge and closing ask first.
 - **Secrets never reach the mods.** The ECR password and the CodeArtifact token stay in shell variables and are passed on by `printf`, a builtin. So they never appear in a process's arguments (visible in `ps`), in output, or in JavaScript.
 - **The token file is safe.** It's written owner-only (600), built beside the old file and swapped in whole, so it's never half-written and a failed run leaves it untouched.
