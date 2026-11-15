@@ -151,7 +151,7 @@ herdr-app do layout.switch --name main-prs  # or ctrl-shift-l
 
 You'll need:
 
-- [`gh`](https://cli.github.com), signed in
+- [`gh`](https://cli.github.com), signed in, and recent: Update branch runs `gh pr update-branch`, which older packages (Ubuntu 24.04's 2.45) don't have. GitHub's own apt repository keeps it current.
 - [`claude`](https://claude.com/claude-code), with the Atlassian connector connected on your Claude account
 - `aws` and `docker`, for Daily
 - `jq`, for `link.sh`

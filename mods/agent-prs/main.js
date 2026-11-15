@@ -876,7 +876,15 @@ export default class AgentPrs extends View {
     if (p.automerge && (p.can?.cancelAutoMerge ?? true))
       out.push({ id: "cancel-auto-merge", label: "Cancel auto-merge", doing: "Cancelling auto-merge", done: "Auto-merge off for #N", failed: "Couldn't cancel auto-merge for #N", about: "Turn auto-merge off: it waits for you to merge.", argv: [["pr", "merge", p.url, "--disable-auto"]] });
     if (p.mergeState === "BEHIND" && (p.can?.updateBranch ?? true))
-      out.push({ id: "update-branch", label: "Update branch", doing: "Updating", done: "Updated #N", failed: "Couldn't update #N", about: `Merge ${p.base} into ${p.branch}, so it's up to date.`, argv: [["pr", "update-branch", p.url]] });
+      out.push({
+        id: "update-branch", label: "Update branch", doing: "Updating", done: "Updated #N's branch", failed: "Couldn't update #N's branch",
+        about: `Merge ${p.base} into ${p.branch}, so it's up to date.`,
+        argv: [["pr", "update-branch", p.url]],
+        // GitHub may still be updating the branch when gh returns, so it's read again a little later.
+        settle: 3000,
+        // An older gh (Ubuntu's 2.45, say) has no `pr update-branch`.
+        explain: [[/unknown command/i, "Your GitHub CLI is too old for this: update gh, then try again."]],
+      });
     if (p.failedRuns?.length && (p.can?.write ?? true))
       out.push({ id: "rerun-failed", label: "Re-run failed", doing: "Re-running", done: "Re-running #N's failed jobs", failed: "Couldn't re-run #N's failed jobs", about: "Run the failed jobs again.", argv: p.failedRuns.map((id) => ["run", "rerun", String(id), "--failed", "-R", p.repo]) });
     if (!p.draft)
@@ -938,11 +946,14 @@ export default class AgentPrs extends View {
         }
         if (failed) break;
       }
+      // GitHub's words for a failure an action knows, in plainer ones.
+      const plain = failed && a.explain?.find(([re]) => re.test(failed))?.[1];
       notify(
         failed
-          ? { title: a.failed.replace("#N", n), body: failed.slice(0, 200), level: "error" }
+          ? { title: a.failed.replace("#N", n), body: (plain ?? failed).slice(0, 200), level: "error" }
           : { title: a.done.replace("#N", n), body: p.title, level: "success" },
       );
+      if (!failed && a.settle) await cx.sleep(a.settle);
       await this.reread(p).catch(() => {});
       this.acting.delete(p.url);
       cx.notify();
