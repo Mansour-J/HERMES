@@ -28,7 +28,7 @@
 |---|---|---|
 | 🌅 | **Daily** | My start-of-day setup as buttons: AWS sign-in, Docker login to ECR, CodeArtifact token. Each step counts down until it expires. |
 | 📊 | **Claude** | Which Claude account is signed in, and its plan usage as `/usage` shows it: session, week, per-model limits, each with when it resets. |
-| 🔀 | **Pull requests** | Every open PR of mine, grouped by repository, with CI, reviews, threads, conflicts and a pipeline bar. |
+| 🔀 | **Pull requests** | Every open PR of mine, grouped by repository: where each stands, its pipeline, and buttons to merge, mark ready, update, re-run or close it. |
 | 🎫 | **Jira** | My sprint, next sprint and backlog, each ticket with a plan → implement → PR → merged progress bar and buttons that start the work. |
 | 🗂️ | **One panel** | All four stacked in one framed column under a bar with **REFRESH ALL**, folding to a slim rail of icons and counts. |
 | 🔒 | **Safe by design** | No secret ever reaches the panel's code. Nothing runs, fetches or refreshes until you press a button. |
@@ -56,17 +56,34 @@ What my `daily` shell function does, without the terminal.
 
 ### 🔀 Pull requests
 
-<img src="docs/screenshots/pull-requests.png" width="440" align="right" alt="The Pull requests section with two PR cards">
+<img src="docs/screenshots/pull-requests.png" width="440" align="right" alt="The Pull requests section: a PR with checks running and auto-merge on, and a draft with a failing check and its stage list open">
 
-All my open PRs from one `gh` GraphQL search (about 2 API points), grouped by repository. Repositories start collapsed, and one button opens or closes them all.
+All my open PRs from one `gh` GraphQL search (about 2 API points), grouped by repository. Repositories start collapsed, and one button opens or closes them all. A repository's row shows how many of its PRs have failing checks, and a spinner while any are running.
 
-Each PR is a card with:
+Each PR is a card. Click it to open the PR on GitHub. It has:
 
-- **READY / DRAFT**, number, linked ticket and branch
-- **chips**: CI, 💬 comments, 👍 approvals, 👎 change requests, unresolved threads, conflicts, auto-merge
-- **a pipeline bar**: one segment per workflow, sized by its checks. It opens into the stages, with their durations and every failing check linked to its log.
-- **an attention line** saying what needs you
+- **its title**, with an open or draft icon, then its number, linked ticket and branch → base
+- **where it stands**, in one line: what's in its way first (conflicts, failing checks, change requests, open threads, behind its base, needs approval, checks running, only a maintainer can merge it), or else draft, auto-merging, or ready to merge. 💬 comments, 👍 approvals and auto-merge sit at its end.
+- **a pipeline bar**: one segment per workflow, sized by its checks. Click it to open the stages, with their durations and every failing check linked to its log.
 - **an agent icon** when an agent in Herdr's Agents list opened or pushed the PR. Click it to jump to that agent.
+- **action buttons** along its foot (see below).
+
+<br clear="right">
+
+#### Acting on a PR
+
+<img src="docs/screenshots/pull-requests-merge.png" width="440" align="right" alt="PR cards whose Merge button is on for one that can merge, and off for one that's behind and needs approval and for one in someone else's repository">
+
+Each button shows only when it applies, and only when GitHub says you may use it:
+
+- **Ready for review** on a draft, **To draft** on a PR that's ready
+- **Merge**, with your usual merge method for that repository. It's on every PR that isn't a draft, but only clickable when GitHub says the PR can merge *and* you can write to its repository. Otherwise it's faded, and hovering or clicking it says why: it needs an approving review, it's behind its base, it conflicts, checks are failing or still running, or you only have read access (someone else's project).
+- **Auto-merge** while it waits on reviews or checks, or **Cancel auto-merge**
+- **Update branch** when it's behind its base
+- **Re-run failed** when CI failed: just the failed jobs
+- **Close**, quiet on the right until you hover it
+
+The next step is filled in. Merge, Auto-merge and Close ask first, in Herdr's own dialog. Afterwards just that PR is read again, and a merged or closed one leaves the list.
 
 <br clear="right">
 
@@ -76,8 +93,10 @@ Each PR is a card with:
 
 My tickets in the **current sprint**, the **next sprint** and the **backlog**, read through the Atlassian connector on my Claude account by a short `claude -p` run.
 
-- **Progress bar** in four stages: plan (green when written), implementation (amber while the checklist has work left, green when done), PR (blue when open, red when CI fails) and merged (purple).
+- **Click a ticket** to open it in Jira.
+- **Progress bar** in four stages: plan (green when written), implementation (amber while the checklist has work left, green when done), PR (blue when open, red when CI fails) and merged (purple). Click a stage to open its plan, its checklist or its PR.
 - **PLAN** and **IMPLEMENT** run `/mansour-plan` and `/mansour-implement` in the ticket's agent, or in a new Claude tab named after the ticket. The next step is highlighted, and a step that's done turns its button off.
+- **An agent icon** on a ticket that an agent's tab or space is named after. Click it to jump to that agent.
 - **Add any ticket** by its key or link, even one that isn't assigned to you. It's listed under *Added* until you remove it, and nothing changes in Jira.
 - **Collapsible.** Each ticket is one line with a mini progress bar until you open it, and one button expands or collapses them all.
 
@@ -105,6 +124,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 | `daily-setup.run` · `.cancel` · `.check` | run everything · stop a waiting sign-in · check where each step stands (`.refresh` too) |
 | `claude-usage.refresh` | check Claude usage |
 | `agent-prs.refresh` | load open PRs |
+| `agent-prs.act:<action>:<number>` | press a PR's button: `ready`, `merge`, `auto-merge`, `cancel-auto-merge`, `update-branch`, `rerun-failed`, `draft`, `close` (`owner/repo#number` if two repositories share the number). A button that's off says why, as a click on it does. |
 | `jira-tickets.refresh` | load tickets |
 | `jira-tickets.expand-all` · `.collapse-all` | open or fold every ticket |
 | `jira-tickets.add:<KEY>` · `.remove:<KEY>` | add or remove a ticket by hand |
@@ -113,6 +133,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 ## 🔒 Security
 
 - **Nothing runs by itself.** No timers and no fetches on start: network and model calls happen only when you press ↻, REFRESH ALL or a run button.
+- **Nothing changes on GitHub unless you press it.** A PR's buttons run `gh` as you, and only the ones GitHub says you may use are offered: Merge stays off unless the PR can merge and you can write to its repository. Merging, auto-merge and closing ask first.
 - **Secrets never reach the mods.** The ECR password and the CodeArtifact token stay in shell variables and are passed on by `printf`, a builtin. So they never appear in a process's arguments (visible in `ps`), in output, or in JavaScript.
 - **The token file is safe.** It's written owner-only (600), built beside the old file and swapped in whole, so it's never half-written and a failed run leaves it untouched.
 - **Claude usage needs no token.** It's read through Claude Code itself, and of the account only the email, organization, plan and sign-in end are kept.
@@ -187,7 +208,11 @@ Never put your own details in the repo: an account, a site, a folder or a reposi
 
 ## 📸 Screenshots
 
-The screenshots use made-up data, so no real repository, PR or ticket appears in them. Each mod has a `demo.js` (or a few lines in `main.js`) that it uses when its layout props say `demo: true`. In demo mode it shows that data and runs nothing. To retake them:
+The screenshots use made-up data, so no real repository, PR or ticket appears in them. Each mod has a `demo.js` (or a few lines in `main.js`) that it uses when its layout props say `demo: true`. In demo mode it shows that data and runs nothing: the PR buttons and their dialog work, but only say what they would have done.
+
+The Pull requests section has scenes, named in `mods/agent-prs/demo.js`: `demo: true` opens the CI one (checks running, a failing check in its stage list), and `demo: "merge"` the merging one (ready to merge, behind and waiting for approval, someone else's repository).
+
+To retake them:
 
 ```sh
 ln -s "$PWD/docs/demo/hermes-demo.json" ~/.config/herdr-app/layouts/hermes-demo.json
@@ -196,6 +221,15 @@ herdr-app shot panel.png
 herdr-app do layout.switch --name main-prs
 rm ~/.config/herdr-app/layouts/hermes-demo.json
 ```
+
+For the merging scene, link a copy with that section's prop changed instead:
+
+```sh
+jq '(.. | objects | select(.id == "demo-prs") | .content.props.demo) = "merge"' \
+  docs/demo/hermes-demo.json > ~/.config/herdr-app/layouts/hermes-demo.json
+```
+
+`herdr-app shot` saves the window's last frame, so keep Herdr's window showing while you take one: a hidden window keeps handing back the frame from before it was hidden. The shots here were taken at zoom 1.8; for a section taller than the window, shoot it twice with the sections sized differently and join the two at a divider.
 
 ## 🎨 Icons
 

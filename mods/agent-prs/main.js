@@ -1,8 +1,9 @@
 // Pull requests: every open PR you authored, grouped by repository (each group folds),
-// newest activity first. Each PR is a card: draft or ready, number, ticket, title, branch;
-// chips for CI, comments, approvals and change requests, unresolved threads, conflicts and
-// auto-merge; the pipeline as a bar of its stages (one stage per workflow), which opens
-// into a list of stages and their failing checks; and what needs attention.
+// newest activity first. Each PR is a card: its title (draft or open), number, ticket and
+// branch; one line saying where it stands (failing checks, change requests, conflicts, or
+// ready to merge) with its comments, approvals and auto-merge; the pipeline as a bar of its
+// stages (one stage per workflow), which opens into a list of stages and their failing
+// checks; and a strip of what you can do to it.
 // One GitHub search through gh brings all of it (about 2 API points).
 //
 // A PR an agent in the Agents list opened or pushed to carries that agent's icon; click it
@@ -14,8 +15,8 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, spaces, exec, hc, home, readTextFile, run, notify, nextCommand, theme, layout, props, settings, shared, setShared, window } from "herdr";
-import { DEMO_PRS, DEMO_OPEN_REPOS, DEMO_OPEN_PIPELINES } from "./demo.js";
+import { agents, terminals, spaces, exec, hc, home, readTextFile, run, notify, nextCommand, openOverlay, theme, layout, props, settings, shared, setShared, window } from "herdr";
+import { DEMO_PRS, DEMO_SCENES } from "./demo.js";
 
 const ICON = (name) => `mods/agent-prs/icons/${name}.svg`;
 // Herdr's own GitHub mark, for the title.
@@ -29,25 +30,31 @@ const WIDTH = 340;
 // the person presses refresh. Until then the column shows what it last loaded, and when.
 const KEEP_DAYS = 14;
 const SEARCH = "is:pr is:open author:@me archived:false sort:updated-desc";
-const QUERY = `query($q: String!) {
-  search(query: $q, type: ISSUE, first: 50) {
-    nodes {
-      ... on PullRequest {
-        number title url isDraft updatedAt headRefName reviewDecision mergeable totalCommentsCount
-        autoMergeRequest { enabledAt }
-        repository { nameWithOwner }
-        reviewThreads(first: 50) { nodes { isResolved } }
-        latestOpinionatedReviews(first: 20) { nodes { state } }
-        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { name status conclusion startedAt completedAt detailsUrl
-            checkSuite { workflowRun { workflow { name } } app { name } } }
-          ... on StatusContext { context state createdAt targetUrl }
-        } } } } } }
-      }
-    }
-  }
-}`;
+// What's read about each PR: by the search, and for the one PR re-read after an action on it.
+const FIELDS = `
+  number title url state isDraft updatedAt headRefName baseRefName reviewDecision mergeable mergeStateStatus totalCommentsCount
+  autoMergeRequest { enabledAt }
+  viewerCanEnableAutoMerge viewerCanDisableAutoMerge viewerCanUpdateBranch viewerCanClose
+  repository { nameWithOwner viewerPermission viewerDefaultMergeMethod autoMergeAllowed deleteBranchOnMerge }
+  reviewThreads(first: 50) { nodes { isResolved } }
+  latestOpinionatedReviews(first: 20) { nodes { state } }
+  commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+    __typename
+    ... on CheckRun { name status conclusion startedAt completedAt detailsUrl
+      checkSuite { workflowRun { databaseId workflow { name } } app { name } } }
+    ... on StatusContext { context state createdAt targetUrl }
+  } } } } } }`;
+const QUERY = `query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ${FIELDS} } } } }`;
+const ONE = `query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $n) { ${FIELDS} } } }`;
+// A card's actions. Each runs gh as you, only when its button is pressed; Merge, Auto-merge
+// and Close ask first, in Herdr's confirm dialog. The merge method is your default for the
+// repository (GitHub's viewerDefaultMergeMethod); the branch goes or stays as the repository says.
+const METHOD = { SQUASH: "squash", MERGE: "merge", REBASE: "rebase" };
+const MERGES = { squash: "Squash-merges", merge: "Merges", rebase: "Rebase-merges" };
+// Merge states GitHub lets through now; BLOCKED waits on reviews or checks, BEHIND on the base.
+// They're about the PR, not you: merging also takes write access to its repository.
+const MERGEABLE_NOW = new Set(["CLEAN", "HAS_HOOKS", "UNSTABLE"]);
+const WRITES = new Set(["ADMIN", "MAINTAIN", "WRITE"]);
 const PR_URL = /https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 const DEFAULT_BRANCH = /^(main|master|develop|trunk)$/;
 const TICKET = /\b[A-Z][A-Z0-9]+-\d+\b/g;
@@ -217,6 +224,7 @@ function checkOf(c) {
     started: Date.parse(status ? c.createdAt : c.startedAt) || 0,
     finished: Date.parse(c.completedAt) || 0,
     url: (status ? c.targetUrl : c.detailsUrl) || null,
+    run: status ? null : c.checkSuite?.workflowRun?.databaseId ?? null,
   };
 }
 
@@ -265,6 +273,23 @@ function shape(n) {
     repo: n.repository?.nameWithOwner ?? "",
     draft: Boolean(n.isDraft),
     branch: n.headRefName ?? "",
+    base: n.baseRefName ?? "",
+    mergeState: n.mergeStateStatus ?? "UNKNOWN",
+    method: METHOD[n.repository?.viewerDefaultMergeMethod] ?? "merge",
+    autoMergeAllowed: Boolean(n.repository?.autoMergeAllowed),
+    deleteBranch: Boolean(n.repository?.deleteBranchOnMerge),
+    // Your access to its repository, and what GitHub says you can do to it. A list saved
+    // before these were read has neither: Merge stays off until a refresh reads them.
+    permission: n.repository?.viewerPermission ?? null,
+    can: {
+      write: WRITES.has(n.repository?.viewerPermission),
+      autoMerge: Boolean(n.viewerCanEnableAutoMerge),
+      cancelAutoMerge: Boolean(n.viewerCanDisableAutoMerge),
+      updateBranch: Boolean(n.viewerCanUpdateBranch),
+      close: n.viewerCanClose !== false,
+    },
+    // The workflow runs with a failed check, for Re-run failed.
+    failedRuns: [...new Set(checks.filter((c) => c.state === "fail" && c.run).map((c) => c.run))],
     ticket: ticketIn(n.title) ?? ticketIn(n.headRefName),
     review: n.reviewDecision || null,
     approvals: reviews.filter((s) => s === "APPROVED").length,
@@ -344,7 +369,62 @@ function agentStatus(t, s) {
 }
 
 const stateColor = (t, s) => ({ pass: t.ansi2, fail: t.ansi1, running: t.working, queued: t.dim, skip: t.dim })[s] ?? t.dim;
-const prState = (p) => (p.checks.fail ? "fail" : p.checks.running ? "running" : p.checks.queued ? "queued" : p.checks.total ? "pass" : "skip");
+
+// The title without the ticket key, which the card shows on its own line:
+// "fix: ABC-12 do x" → "fix: do x", "ABC-12 Do x" → "Do x".
+function bareTitle(title, ticket) {
+  if (!ticket) return title;
+  const m = title.match(new RegExp(`^((?:[a-z]+(?:\\([^)]*\\))?!?:\\s*)?)${ticket}\\b[\\s:,-]*`, "i"));
+  return m && m[0].length < title.length ? m[1] + title.slice(m[0].length) : title;
+}
+
+// Where a PR stands, worst first: the first is the card's headline, the rest what else is in
+// its way. With nothing in the way: draft, auto-merging, or ready to merge (by you, or by
+// someone who can write to its repository).
+function standing(t, p) {
+  const c = p.checks;
+  const out = [];
+  if (p.conflicts) out.push({ text: p.base ? `Conflicts with ${p.base}` : "Merge conflicts", color: t.ansi1, glyph: "fail" });
+  if (c.fail) out.push({ text: `${plural(c.fail, "check")} failing`, color: t.ansi1, glyph: "fail" });
+  if (p.rejections || p.review === "CHANGES_REQUESTED") out.push({ text: "Changes requested", color: t.ansi1, glyph: "fail" });
+  if (p.unresolved) out.push({ text: plural(p.unresolved, "open thread"), color: t.blocked, glyph: "alert" });
+  if (p.mergeState === "BEHIND") out.push({ text: p.base ? `Behind ${p.base}` : "Behind its base", color: t.blocked, glyph: "alert" });
+  if (!p.draft && p.review === "REVIEW_REQUIRED") out.push({ text: "Needs approval", color: t.muted, glyph: "waiting" });
+  if (c.running || c.queued) out.push({ text: `Checks running · ${c.pass + c.fail} of ${c.total}`, color: t.working, glyph: "running" });
+  // Someone else's repository: GitHub may call it mergeable, but not by you.
+  if (!p.draft && p.can && !p.can.write)
+    out.push({ text: out.length || !MERGEABLE_NOW.has(p.mergeState) ? "Only a maintainer can merge it" : "Ready for a maintainer to merge", color: t.muted, glyph: "waiting" });
+  if (out.length) return out;
+  if (p.draft) return [{ text: "Draft", color: t.muted, glyph: "draft" }];
+  if (p.automerge) return [{ text: "Auto-merges when ready", color: t.ansi5, glyph: "automerge" }];
+  if (MERGEABLE_NOW.has(p.mergeState)) {
+    if (!p.can) return [{ text: "Press ↻ to see if you can merge it", color: t.muted, glyph: "waiting" }];
+    return [{ text: "Ready to merge", color: t.ansi2, glyph: "pass" }];
+  }
+  if (p.mergeState === "BLOCKED") return [{ text: "Blocked by its repository's rules", color: t.muted, glyph: "waiting" }];
+  return [{ text: "Open", color: t.muted, glyph: "open" }];
+}
+
+// Why Merge is off for a PR, or null when you can merge it now. It's on only when GitHub says
+// the PR can merge (its merge state) and you can write to its repository; anything else says
+// what's in the way, so a Merge button never offers what GitHub would refuse.
+function mergeBlock(p) {
+  if (!p.can) return "Press ↻ first: this list was saved before it knew whether you can merge.";
+  const base = p.base || "its base branch";
+  const why = [];
+  if (!p.can.write) why.push(`you only have ${(p.permission ?? "no").toLowerCase()} access to ${p.repo}`);
+  if (!MERGEABLE_NOW.has(p.mergeState)) {
+    if (p.conflicts || p.mergeState === "DIRTY") why.push(`it conflicts with ${base}`);
+    if (p.mergeState === "BEHIND") why.push(`it's behind ${base} (update the branch first)`);
+    if (p.rejections || p.review === "CHANGES_REQUESTED") why.push("changes were requested");
+    else if (p.review === "REVIEW_REQUIRED") why.push("it needs an approving review");
+    if (p.checks.fail) why.push(`${plural(p.checks.fail, "check")} failing`);
+    else if (p.checks.running || p.checks.queued) why.push("its checks are still running");
+    if (why.length === (p.can.write ? 0 : 1))
+      why.push(p.mergeState === "UNKNOWN" ? "GitHub hasn't worked out yet whether it can merge (refresh in a moment)" : "its repository's rules aren't met yet");
+  }
+  return why.length ? `Can't merge: ${why.join("; ")}.` : null;
+}
 
 export default class AgentPrs extends View {
   init(_props, cx) {
@@ -363,13 +443,18 @@ export default class AgentPrs extends View {
     this.spinning = false;
     tellBusy(false);
     this.problem = null;
-    // Screenshots (layout prop `demo: true`): made-up data, and nothing runs.
+    // PR url → the action running on it; the action waiting on the confirm dialog.
+    this.acting = new Map();
+    this.pending = null;
+    // Screenshots (layout prop `demo`: `true`, or a scene's name in demo.js): made-up data,
+    // and nothing runs.
     if (props()?.demo) {
       this.prs = DEMO_PRS.map(shape);
       this.prsAt = Date.now() - 4 * 60000;
       this.byAgent = new Map();
-      this.openRepos = new Set(DEMO_OPEN_REPOS);
-      this.openPipelines = new Set(DEMO_OPEN_PIPELINES);
+      const scene = DEMO_SCENES[props().demo] ?? DEMO_SCENES.default;
+      this.openRepos = new Set(scene.repos);
+      this.openPipelines = new Set(scene.pipelines);
     }
     // `agent-prs.refresh` and `.toggle` (keys.json, or `herdr-app do`) are the buttons.
     cx.spawn(async (cx) => {
@@ -377,6 +462,10 @@ export default class AgentPrs extends View {
         const command = await nextCommand();
         if (command === "refresh") this.refreshNow(cx);
         if (command === "toggle") toggle();
+        // Sent by the confirm dialog an action opened (see act).
+        if (command === "confirmed") this.confirmed(cx);
+        const [verb, ...rest] = command.split(/[\s:]+/);
+        if (verb === "act") this.actBy(rest, cx);
       }
     });
   }
@@ -572,25 +661,28 @@ export default class AgentPrs extends View {
       .child(spin ? glyph.spin(900) : glyph);
   }
 
-  // A small status pill: a glyph (or a dot) and a few words.
-  chip(t, id, color, glyph, text, tip) {
+  // A count on a card: an icon and a number, no frame.
+  count(t, id, color, glyph, text, tip) {
     return h_flex()
-      .id(`chip-${id}`)
+      .id(`count-${id}`)
       .flex_none()
-      .h(18)
-      .px(5)
-      .gap(4)
+      .gap(3)
       .items_center()
-      .rounded(4)
-      .border_1()
-      .border_color(alpha(color, "55"))
-      .bg(alpha(color, "14"))
       .text_color(color)
-      .text_size(10)
-      .font_semibold()
-      .when(Boolean(tip), (el) => el.tooltip(tip))
-      .child(glyph ?? div().size(6).rounded(3).bg(color))
-      .child(text);
+      .tooltip(tip)
+      .child(svg(ICON(glyph)).size(11).flex_none())
+      .when(text !== "", (el) => el.child(text));
+  }
+
+  // The glyph before a card's headline.
+  standingGlyph(t, s) {
+    if (s.glyph === "running") return svg(CHROME("spinner")).size(11).flex_none().text_color(s.color).spin(900);
+    if (s.glyph === "fail") return svg(CHROME("x")).size(12).flex_none().text_color(s.color);
+    if (s.glyph === "pass") return svg(CHROME("check")).size(12).flex_none().text_color(s.color);
+    if (s.glyph === "alert") return svg(ICON("alert")).size(12).flex_none().text_color(s.color);
+    if (s.glyph === "automerge") return svg(ICON("automerge")).size(12).flex_none().text_color(s.color);
+    if (s.glyph === "draft") return svg(ICON("pr-draft")).size(12).flex_none().text_color(s.color);
+    return div().size(7).mx(2).flex_none().rounded(4).border(1.5).border_color(s.color);
   }
 
   stateGlyph(t, state, size = 11) {
@@ -624,22 +716,25 @@ export default class AgentPrs extends View {
       .child(agentStatus(t, agent.status));
   }
 
-  chips(t, p) {
-    const c = p.checks;
-    const out = [];
+  // Where the PR stands, in one line (its glyph is in the card's gutter): the headline in its
+  // color, what else is in the way after it, and on the right its comments, approvals and
+  // auto-merge. Change requests are in the words, so they get no count.
+  standingRow(t, p, all) {
+    const [head, ...rest] = all;
     const k = `${p.repo}-${p.number}`;
-    if (c.fail) out.push(this.chip(t, `${k}-ci`, t.ansi1, null, `CI ${c.fail} FAILED`));
-    else if (c.running || c.queued) out.push(this.chip(t, `${k}-ci`, t.working, null, `CI ${c.pass + c.fail}/${c.total}`, `${c.running} running, ${c.queued} queued`));
-    else if (c.total) out.push(this.chip(t, `${k}-ci`, t.ansi2, null, "CI PASSED"));
-    else out.push(this.chip(t, `${k}-ci`, t.dim, null, "NO CI"));
-    out.push(this.chip(t, `${k}-comments`, p.comments ? t.muted : t.dim, svg(ICON("comment")).size(10), String(p.comments), plural(p.comments, "comment")));
-    if (p.approvals) out.push(this.chip(t, `${k}-approved`, t.ansi2, svg(ICON("approved")).size(10), String(p.approvals), plural(p.approvals, "approval")));
-    if (p.rejections) out.push(this.chip(t, `${k}-rejected`, t.ansi1, svg(ICON("rejected")).size(10), String(p.rejections), plural(p.rejections, "change request")));
-    if (!p.approvals && !p.rejections && p.review === "REVIEW_REQUIRED") out.push(this.chip(t, `${k}-review`, t.dim, null, "NEEDS REVIEW"));
-    if (p.unresolved) out.push(this.chip(t, `${k}-threads`, t.blocked, svg(ICON("threads")).size(10), `THREADS ${p.unresolved}`, plural(p.unresolved, "unresolved thread")));
-    if (p.conflicts) out.push(this.chip(t, `${k}-conflicts`, t.ansi1, null, "CONFLICTS", "Merge conflicts with the base branch"));
-    if (p.automerge) out.push(this.chip(t, `${k}-automerge`, t.ansi5, svg(ICON("automerge")).size(10), "AUTOMERGE"));
-    return out;
+    const counts = [];
+    if (p.comments) counts.push(this.count(t, `${k}-comments`, t.muted, "comment", String(p.comments), plural(p.comments, "comment")));
+    if (p.approvals) counts.push(this.count(t, `${k}-approved`, t.ansi2, "approved", String(p.approvals), plural(p.approvals, "approval")));
+    if (p.automerge) counts.push(this.count(t, `${k}-automerge`, t.ansi5, "automerge", "", "Auto-merge is on: GitHub merges it once its required reviews and checks pass."));
+    return h_flex()
+      .id(`standing-${k}`)
+      .gap(6)
+      .items_center()
+      .text_size(11.5)
+      .when(rest.length > 0, (el) => el.tooltip(all.map((s) => s.text).join(" · ")))
+      .child(div().flex_none().font_medium().text_color(head.color).child(head.text))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(rest.length ? `· ${rest.map((s) => s.text[0].toLowerCase() + s.text.slice(1)).join(" · ")}` : ""))
+      .child(h_flex().flex_none().gap(9).items_center().text_size(11).children(counts));
   }
 
   // The pipeline: one segment per stage, sized by its checks, each check a slice in its color.
@@ -653,14 +748,12 @@ export default class AgentPrs extends View {
       c.queued ? `${c.queued} queued` : null,
       `${c.pass + c.fail}/${c.total} done`,
     ].filter(Boolean).join(" · ");
-    return v_flex()
-      .gap(4)
-      .child(
-        h_flex()
-          .w_full()
-          .h(6)
-          .gap(4)
-          .children(
+    const bar = h_flex()
+      .flex_1()
+      .min_w(0)
+      .h(4)
+      .gap(3)
+      .children(
             shown.map((s, i) =>
               h_flex()
                 .id(`stage-${p.repo}-${p.number}-${i}`)
@@ -681,25 +774,27 @@ export default class AgentPrs extends View {
                     ),
                 ),
             ),
-          ),
-      )
+          );
+    // The bar and a chevron; a click anywhere on the row opens or closes the stage list.
+    return v_flex()
+      .gap(6)
       .child(
         h_flex()
           .id(`pipe-${p.repo}-${p.number}`)
-          .gap(6)
+          .h(14)
+          .gap(8)
           .items_center()
-          .text_size(11)
           .text_color(t.dim)
           .cursor_pointer()
           .hover((s) => s.text_color(t.foreground))
+          .tooltip(`${plural(shown.length, "stage")} · ${summary}. Click to ${open ? "hide" : "show"} the stages.`)
           .on_click((_e, cx) => {
             cx.stop_propagation();
             open ? this.openPipelines.delete(p.url) : this.openPipelines.add(p.url);
             cx.notify();
           })
-          .child(div().flex_1().min_w(0).truncate().child(`${plural(shown.length, "stage")} · ${summary}`))
-          .child(div().flex_none().child(open ? "hide stages" : "show stages"))
-          .child(svg(CHROME(`chevron-${open ? "down" : "right"}`)).size(10).flex_none()),
+          .child(bar)
+          .child(svg(CHROME(`chevron-${open ? "down" : "right"}`)).size(11).flex_none()),
       )
       .when(open, (el) => el.child(this.stageList(t, p)));
   }
@@ -750,85 +845,242 @@ export default class AgentPrs extends View {
       );
   }
 
-  // What stands between this PR and merging, in one line.
-  attention(t, p) {
-    const parts = [
-      p.checks.fail ? plural(p.checks.fail, "failing check") : null,
-      p.rejections ? plural(p.rejections, "change request") : null,
-      p.unresolved ? plural(p.unresolved, "unresolved thread") : null,
-      p.conflicts ? "merge conflicts with the base branch" : null,
-    ].filter(Boolean);
-    if (!parts.length) return null;
-    return h_flex()
-      .gap(6)
-      .px(7)
-      .py(4)
-      .items_center()
-      .rounded(5)
-      .border_1()
-      .border_color(alpha(t.blocked, "66"))
-      .bg(alpha(t.blocked, "12"))
-      .text_size(11)
-      .text_color(t.blocked)
-      .child(svg(ICON("alert")).size(12).flex_none())
-      .child(div().flex_1().min_w(0).child(parts.join(" · ")));
+  // What can be done to a PR now, primary first and Close last. Each shows only when GitHub
+  // says you can (its viewerCan… fields, and your access to the repository), except Merge,
+  // which is always there on a ready PR and off with its reason when you can't.
+  actionsFor(p) {
+    const how = p.method;
+    const n = `#${p.number}`;
+    const unchecked = p.checks.fail || p.checks.running || p.checks.queued ? " Not every check has passed." : "";
+    const out = [];
+    if (p.draft)
+      out.push({ id: "ready", label: "Ready for review", doing: "Marking ready", done: "#N is ready for review", failed: "Couldn't mark #N ready", kind: "primary", about: "Mark it ready for review: its reviewers are asked.", argv: [["pr", "ready", p.url]] });
+    // Merge is on every PR that isn't a draft, and off (saying why) unless you can merge it now.
+    if (!p.draft)
+      out.push({
+        id: "merge", label: "Merge", doing: "Merging", done: "Merged #N", failed: "Couldn't merge #N", kind: "primary", confirm: true,
+        disabled: mergeBlock(p),
+        about: `${MERGES[how]} it into ${p.base}.`,
+        ask: `Merge ${n}?`,
+        detail: `${MERGES[how]} ${p.repo}${n} into ${p.base}. Its branch ${p.branch} is ${p.deleteBranch ? "then deleted, as the repository does" : "kept"}.${unchecked}`,
+        argv: [["pr", "merge", p.url, `--${how}`]],
+      });
+    if (!p.draft && p.mergeState === "BLOCKED" && !p.automerge && (p.can ? p.can.autoMerge : p.autoMergeAllowed))
+      out.push({
+        id: "auto-merge", label: "Auto-merge", doing: "Turning on auto-merge", done: "Auto-merge on for #N", failed: "Couldn't turn on auto-merge for #N", kind: "primary", confirm: true,
+        about: "GitHub merges it once its required reviews and checks pass.",
+        ask: `Auto-merge ${n}?`,
+        detail: `GitHub ${MERGES[how].toLowerCase()} ${p.repo}${n} into ${p.base} by itself once its required reviews and checks pass.`,
+        argv: [["pr", "merge", p.url, "--auto", `--${how}`]],
+      });
+    if (p.automerge && (p.can?.cancelAutoMerge ?? true))
+      out.push({ id: "cancel-auto-merge", label: "Cancel auto-merge", doing: "Cancelling auto-merge", done: "Auto-merge off for #N", failed: "Couldn't cancel auto-merge for #N", about: "Turn auto-merge off: it waits for you to merge.", argv: [["pr", "merge", p.url, "--disable-auto"]] });
+    if (p.mergeState === "BEHIND" && (p.can?.updateBranch ?? true))
+      out.push({ id: "update-branch", label: "Update branch", doing: "Updating", done: "Updated #N", failed: "Couldn't update #N", about: `Merge ${p.base} into ${p.branch}, so it's up to date.`, argv: [["pr", "update-branch", p.url]] });
+    if (p.failedRuns?.length && (p.can?.write ?? true))
+      out.push({ id: "rerun-failed", label: "Re-run failed", doing: "Re-running", done: "Re-running #N's failed jobs", failed: "Couldn't re-run #N's failed jobs", about: "Run the failed jobs again.", argv: p.failedRuns.map((id) => ["run", "rerun", String(id), "--failed", "-R", p.repo]) });
+    if (!p.draft)
+      out.push({ id: "draft", label: "To draft", doing: "Converting", done: "#N is a draft again", failed: "Couldn't convert #N to a draft", about: "Convert it back to a draft.", argv: [["pr", "ready", p.url, "--undo"]] });
+    if (p.can?.close ?? true)
+      out.push({
+        id: "close", label: "Close", doing: "Closing", done: "Closed #N", failed: "Couldn't close #N", kind: "danger", confirm: true,
+        about: "Close it without merging.",
+        ask: `Close ${n} without merging?`,
+        detail: `${p.repo}${n} is closed. Its branch ${p.branch} stays, and it can be reopened on GitHub.`,
+        argv: [["pr", "close", p.url]],
+      });
+    return out;
   }
 
+  // A button's press: straight away, or once the confirm dialog says so.
+  act(p, a, cx) {
+    if (this.acting.has(p.url)) return;
+    if (a.disabled) return notify({ title: `${a.label} is off for #${p.number}`, body: a.disabled, level: "warning" });
+    if (!a.confirm) return this.perform(p, a, cx);
+    this.pending = { url: p.url, id: a.id };
+    openOverlay({ mod: "confirm", kind: "dialog", width: 440, height: 200, props: { title: a.ask, detail: a.detail, command: { name: "agent-prs.confirmed" } } });
+  }
+
+  // `agent-prs.act:<action>:<number>` (or `<owner>/<repo>#<number>`) presses that PR's button.
+  actBy([id, which = ""], cx) {
+    const [repo, num] = which.includes("#") ? which.split("#") : [null, which];
+    const found = this.prs.filter((x) => String(x.number) === num && (!repo || x.repo === repo));
+    if (found.length !== 1) return notify({ title: found.length ? `More than one #${num}: say which, as owner/repo#${num}` : `No open PR ${which} here`, level: "error" });
+    const a = this.actionsFor(found[0]).find((x) => x.id === id);
+    if (!a) return notify({ title: `#${num} has no ${id} now`, body: `It has: ${this.actionsFor(found[0]).filter((x) => !x.disabled).map((x) => x.id).join(", ")}.`, level: "error" });
+    this.act(found[0], a, cx);
+  }
+
+  // Confirmed: the action is looked up again, in case the PR changed meanwhile.
+  confirmed(cx) {
+    const want = this.pending;
+    this.pending = null;
+    const p = want && this.prs.find((x) => x.url === want.url);
+    const a = p && this.actionsFor(p).find((x) => x.id === want.id);
+    if (a?.disabled) return notify({ title: `${a.label} is off for #${p.number}`, body: a.disabled, level: "warning" });
+    if (a) this.perform(p, a, cx);
+  }
+
+  perform(p, a, cx) {
+    const n = `#${p.number}`;
+    // Screenshots (layout prop `demo: true`): the buttons and the dialog work, nothing runs.
+    if (props()?.demo) return notify({ title: a.done.replace("#N", n), body: "Demo mode: nothing ran.", level: "info" });
+    this.acting.set(p.url, a.id);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let failed = null;
+      for (const argv of a.argv) {
+        try {
+          const r = await exec("gh", argv, { timeout: 120000 });
+          if (r.code !== 0) failed = lines(r.stderr)[0] ?? lines(r.stdout)[0] ?? `gh exited ${r.code}`;
+        } catch (e) {
+          failed = String(e?.message ?? e);
+        }
+        if (failed) break;
+      }
+      notify(
+        failed
+          ? { title: a.failed.replace("#N", n), body: failed.slice(0, 200), level: "error" }
+          : { title: a.done.replace("#N", n), body: p.title, level: "success" },
+      );
+      await this.reread(p).catch(() => {});
+      this.acting.delete(p.url);
+      cx.notify();
+    });
+  }
+
+  // The one PR again, straight from its repository (the search can lag behind a merge): kept
+  // up to date while it's open, gone once it's merged or closed.
+  async reread(p) {
+    const [owner, name] = p.repo.split("/");
+    const r = await exec("gh", ["api", "graphql", "-f", `query=${ONE}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `n=${p.number}`], { timeout: 60000 });
+    if (r.code !== 0) return;
+    const node = JSON.parse(r.stdout)?.data?.repository?.pullRequest;
+    if (!node) return;
+    this.prs = node.state === "OPEN" ? this.prs.map((x) => (x.url === p.url ? shape(node) : x)) : this.prs.filter((x) => x.url !== p.url);
+    save("open-prs-v3", this.prs);
+  }
+
+  // The next step is filled, the others outlined, and Close is quiet until hovered. A button
+  // that's off (Merge, when you can't merge) is faded, says why on hover, and a click on it
+  // only says why again.
+  actionButton(t, p, a) {
+    const doing = this.acting.get(p.url);
+    const busy = doing === a.id;
+    const disabled = Boolean(a.disabled);
+    const off = Boolean(doing) || disabled;
+    const filled = a.kind === "primary" && !off;
+    const danger = a.kind === "danger";
+    return h_flex()
+      .id(`act-${p.repo}-${p.number}-${a.id}`)
+      .flex_none()
+      .h(22)
+      .px(8)
+      .gap(5)
+      .items_center()
+      .rounded(5)
+      .text_size(11)
+      .font_medium()
+      .when(filled, (el) => el.bg(t.accent).text_color(t.accent_foreground).font_semibold())
+      .when(!filled && !danger, (el) => el.border_1().border_color(disabled ? alpha(t.border, "99") : t.border).when(!disabled, (b) => b.bg(t.background)))
+      .when(!filled, (el) => el.text_color(busy ? t.working : off ? t.dim : danger ? t.dim : t.muted))
+      .when(disabled, (el) => el.opacity(0.6).cursor_not_allowed())
+      .when(!off, (el) =>
+        el.cursor_pointer().hover((s) =>
+          filled ? s.bg(alpha(t.accent, "d9")) : danger ? s.bg(alpha(t.ansi1, "1f")).text_color(t.ansi1) : s.bg(t.hover).text_color(t.foreground),
+        ),
+      )
+      .tooltip(disabled ? a.disabled : a.confirm ? `${a.about} Asks first.` : a.about)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (!doing) this.act(p, a, cx);
+      })
+      .when(busy, (el) => el.child(svg(CHROME("spinner")).size(10).flex_none().spin(900)))
+      .child(busy ? `${a.doing}…` : a.label);
+  }
+
+
+  // A PR: its title and where it's from, where it stands, its pipeline, and what you can do
+  // to it. The left gutter holds its draft-or-open icon and its standing's glyph, so the
+  // cards in a list read down one column.
   card(t, p, owners, tabs) {
-    const alert = this.attention(t, p);
+    const all = standing(t, p);
+    const mono = settings().font_family ?? "JetBrains Mono";
+    const actions = this.actionsFor(p);
+    const close = actions.find((a) => a.id === "close");
+    const gutter = (child) => div().w(14).flex_none().flex().items_center().justify_center().child(child);
+    const dot = () => div().flex_none().text_color(alpha(t.dim, "99")).child("·");
     return v_flex()
       .id(`pr-${p.repo}-${p.number}`)
       .flex_none()
       .mx(4)
       .mb(6)
-      .p(9)
-      .gap(5)
       .rounded(8)
+      .overflow_hidden()
       .border_1()
       .border_color(t.border)
       .cursor_pointer()
-      .hover((s) => s.border_color(t.input).bg(alpha(t.hover, "60")))
+      .hover((s) => s.border_color(t.input))
       .tooltip(`${p.title} · click to open on GitHub`)
       .on_click(() => openUrl(p.url))
       .child(
-        h_flex()
-          .gap(6)
-          .items_center()
-          .text_size(11.5)
+        v_flex()
+          .px(10)
+          .pt(8)
+          .pb(9)
+          .gap(4)
+          // The title wraps rather than being cut: in a narrow panel it's what tells PRs apart.
           .child(
-            div()
-              .flex_none()
-              .h(17)
-              .px(5)
-              .flex()
-              .items_center()
-              .rounded(4)
-              .border_1()
-              .border_color(p.draft ? t.dim : t.ansi2)
-              .text_color(p.draft ? t.muted : t.ansi2)
-              .text_size(9.5)
-              .font_bold()
-              .child(p.draft ? "DRAFT" : "READY"),
+            h_flex()
+              .gap(7)
+              .items_start()
+              .child(gutter(svg(ICON(p.draft ? "pr-draft" : "pr-open")).size(14).text_color(p.draft ? t.dim : t.ansi2)).h(18).id(`kind-${p.repo}-${p.number}`).tooltip(p.draft ? "Draft" : "Open, ready for review"))
+              .child(div().flex_1().min_w(0).text_size(13).line_height("18px").font_medium().text_color(t.foreground).child(bareTitle(p.title, p.ticket)))
+              .children(owners.map((o) => this.agentChip(t, p, o, tabs)))
+              .child(
+                div()
+                  .id(`updated-${p.repo}-${p.number}`)
+                  .flex_none()
+                  .h(18)
+                  .flex()
+                  .items_center()
+                  .text_size(11)
+                  .text_color(t.dim)
+                  .tooltip(`Updated ${ago(p.updated)}`)
+                  .child(ago(p.updated).replace(" ago", "").replace("just now", "now")),
+              ),
           )
-          .child(div().flex_none().font_semibold().text_color(t.foreground).child(`#${p.number}`))
-          .when(Boolean(p.ticket), (el) => el.child(div().flex_none().font_semibold().text_color(t.accent).child(p.ticket)))
-          .child(div().flex_1())
-          .children(owners.map((o) => this.agentChip(t, p, o, tabs)))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child(ago(p.updated))),
+          .child(
+            h_flex()
+              .pl(21)
+              .gap(5)
+              .items_center()
+              .text_size(11)
+              .text_color(t.dim)
+              .child(div().flex_none().text_color(t.muted).child(`#${p.number}`))
+              .when(Boolean(p.ticket), (el) => el.child(dot()).child(div().flex_none().text_color(t.accent).child(p.ticket)))
+              .child(dot())
+              .child(svg(CHROME("git-branch")).size(11).flex_none())
+              .child(div().min_w(0).truncate().font_family(mono).child(p.branch))
+              .when(Boolean(p.base), (el) => el.child(div().flex_none().font_family(mono).text_color(alpha(t.dim, "bb")).child(`→ ${p.base}`))),
+          )
+          .child(h_flex().gap(7).items_center().child(gutter(this.standingGlyph(t, all[0]))).child(div().flex_1().min_w(0).child(this.standingRow(t, p, all))))
+          .when(p.stages.some((s) => s.state !== "skip"), (el) => el.child(div().pl(21).child(this.pipeline(t, p)))),
       )
-      .child(div().text_size(13).font_medium().text_color(t.foreground).truncate().child(p.title))
       .child(
         h_flex()
+          .flex_wrap()
           .gap(5)
           .items_center()
-          .text_size(11)
-          .text_color(t.dim)
-          .child(svg(CHROME("git-branch")).size(11).flex_none())
-          .child(div().flex_1().min_w(0).truncate().font_family(settings().font_family ?? "JetBrains Mono").child(p.branch)),
-      )
-      .child(h_flex().flex_wrap().gap(4).children(this.chips(t, p)))
-      .when(p.stages.some((s) => s.state !== "skip"), (el) => el.child(this.pipeline(t, p)))
-      .when(Boolean(alert), (el) => el.child(alert));
+          .px(8)
+          .py(6)
+          .border_t(1)
+          .border_color(t.border)
+          .bg(alpha(t.hover, "66"))
+          .children(actions.filter((a) => a !== close).map((a) => this.actionButton(t, p, a)))
+          .child(div().flex_1())
+          .when(Boolean(close), (el) => el.child(this.actionButton(t, p, close))),
+      );
   }
 
   repoHeader(t, repo, prs) {

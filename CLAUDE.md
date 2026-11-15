@@ -8,4 +8,4 @@
 - Check each mod you touch with `herdr-app check mods/<name>`, then `herdr-app status` for errors. Use `herdr-app shot` to see the window.
 - Neither column refreshes by itself. Network and model calls happen only when I press ↻. Don't add timers or fetches on start.
 - Theme colors can be `#rrggbbaa`. Use the mods' `alpha()` helper; never append hex to a color.
-- Each mod has a demo mode (layout prop `demo: true`, data in its `demo.js` or a few lines in `init`) for the README screenshots: made-up data, nothing runs. Keep demo data made up, never real repos, PRs or tickets, and keep it in step when a mod's data shape changes. See README "Screenshots".
+- Each mod has a demo mode (layout prop `demo: true`, data in its `demo.js` or a few lines in `init`) for the README screenshots: made-up data, nothing runs. Pull requests also takes a scene's name (`demo: "merge"`, see its `demo.js`). Keep demo data made up, never real repos, PRs or tickets, and keep it in step when a mod's data shape changes. See README "Screenshots".
