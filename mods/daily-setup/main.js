@@ -2,8 +2,9 @@
 // Three steps against one AWS profile: sign in (SSO), log Docker in to ECR, and put a
 // CodeArtifact token in ~/.gradle/gradle.properties for Gradle. Run them all, or one.
 //
-// Nothing runs or checks by itself: status is read when the person presses refresh, and
-// after a run. Between checks the ECR login and the token count down from when they were
+// Nothing runs or checks by itself: status is read when the person presses refresh (or
+// Refresh all, by hand or on the timer the person may tick in its popup: mods/hermes), and
+// after a run. A timer only ever checks: the steps run only when pressed. Between checks the ECR login and the token count down from when they were
 // made, since both last 12 hours.
 //
 // Secrets never reach this code. Each command that handles one does it inside its own shell:
@@ -80,7 +81,7 @@ function find(node, id) {
 const nodeId = () => props()?.node ?? "daily";
 const inBar = () => Boolean(props()?.bar);
 const isPopup = () => Boolean(props()?.popup);
-// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// Whether this section is refreshing, for Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
 const busyKey = () => `${props()?.panel ?? nodeId()}.busy.daily-setup`;
 // Where the steps stand, as the copy that runs them shares it for the popup; the demo's apart.

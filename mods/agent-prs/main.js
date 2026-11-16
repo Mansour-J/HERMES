@@ -27,7 +27,8 @@ const RAIL = 44;
 const RAIL_SECTION = 84;
 const WIDTH = 340;
 // Nothing refreshes by itself: the list, and which agents it ties to, change only when
-// the person presses refresh. Until then the column shows what it last loaded, and when.
+// the person presses refresh, or Refresh all presses it (by hand, or on the timer the person
+// may tick in its popup: mods/hermes). Until then the column shows what it last loaded, and when.
 const KEEP_DAYS = 14;
 const SEARCH = "is:pr is:open author:@me archived:false sort:updated-desc";
 // What's read about each PR: by the search, and for the one PR re-read after an action on it.
@@ -87,7 +88,7 @@ function find(node, id) {
 // The layout node this copy sits in. Its width says rail or list, as the left sidebar's does,
 // so dragging its edge narrow folds it too.
 const nodeId = () => props()?.node ?? "prs";
-// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// Whether this section is refreshing, for Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
 const busyKey = () => `${nodeId()}.busy.agent-prs`;
 const tellBusy = (busy) => {

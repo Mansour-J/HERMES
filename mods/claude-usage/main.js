@@ -10,7 +10,8 @@
 // from `claude auth status` (Claude Code's own account summary, which holds no credentials).
 // Only those fields are kept.
 //
-// Nothing refreshes by itself: press ↻. Between checks the reset times count down, and a
+// Nothing refreshes by itself: press ↻ (or Refresh all, by hand or on the timer the person
+// may tick in its popup: mods/hermes). Between checks the reset times count down, and a
 // window that has reset since is shown as such.
 //
 // Where it sits, by layout props:
@@ -54,7 +55,7 @@ function find(node, id) {
 const nodeId = () => props()?.node ?? "claude-usage";
 const inBar = () => Boolean(props()?.bar);
 const isPopup = () => Boolean(props()?.popup);
-// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// Whether this section is refreshing, for Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
 const busyKey = () => `${props()?.panel ?? nodeId()}.busy.claude-usage`;
 // What the checking copy knows, for the popup; the demo's apart from the real one.

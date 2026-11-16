@@ -240,6 +240,20 @@
               }
             },
             {
+              "id": "status-refresh",
+              "type": "block",
+              "size": {
+                "px": 112
+              },
+              "content": {
+                "mod": "hermes",
+                "props": {
+                  "bar": true,
+                  "panel": "work-side"
+                }
+              }
+            },
+            {
               "id": "status-daily",
               "type": "block",
               "size": {

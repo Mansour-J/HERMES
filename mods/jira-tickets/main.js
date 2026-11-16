@@ -30,7 +30,8 @@ const RAIL = 44;
 const RAIL_SECTION = 84;
 const WIDTH = 320;
 // Nothing refreshes by itself: each lookup is a model call, made only when the person
-// presses refresh. Until then the column shows what it last loaded, and when.
+// presses refresh, or Refresh all presses it (by hand, or on the timer the person may tick
+// in its popup: mods/hermes). Until then the column shows what it last loaded, and when.
 const SEARCH_TOOL = "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql";
 const FIELDS = ["summary", "status", "issuetype", "priority", "parent", "updated"];
 const ME = "assignee = currentUser()";
@@ -133,7 +134,7 @@ function find(node, id) {
 
 // The layout node this copy sits in; its width says rail or list.
 const nodeId = () => props()?.node ?? "jira";
-// Whether this section is refreshing, for the panel bar's Refresh all (mods/hermes): it
+// Whether this section is refreshing, for Refresh all (mods/hermes): it
 // spins while any section does. Shared, so every mod sees it.
 const busyKey = () => `${nodeId()}.busy.jira-tickets`;
 const tellBusy = (busy) => {

@@ -239,6 +239,21 @@
               }
             },
             {
+              "id": "demo-refresh",
+              "type": "block",
+              "size": {
+                "px": 112
+              },
+              "content": {
+                "mod": "hermes",
+                "props": {
+                  "bar": true,
+                  "panel": "work-side",
+                  "demo": true
+                }
+              }
+            },
+            {
               "id": "demo-daily-chip",
               "type": "block",
               "size": {
