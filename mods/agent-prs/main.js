@@ -106,19 +106,24 @@ function toggle() {
   const node = find(layout(), id);
   if (!node) return;
   const sections = node.type === "column" ? node.children ?? [] : [];
+  // The sizes to go back to are kept per layout: another layout with a column of the same id
+  // (the screenshots' demo) mustn't overwrite them while this one is folded. (Before they
+  // were kept per column only, so a panel folded then still has them there.)
+  const key = `${shared("layout") ?? "layout"}.${id}`;
   if (!narrow()) {
-    setShared(`${id}.width`, width());
-    setShared(`${id}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
+    setShared(`${key}.width`, width());
+    setShared(`${key}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
     run("layout.resize", { id, px: RAIL });
     for (const c of sections) run("layout.resize", { id: c.id, px: RAIL_SECTION });
   } else {
-    run("layout.resize", { id, px: Math.max(240, Number(shared(`${id}.width`)) || WIDTH) });
-    const before = shared(`${id}.sections`) ?? {};
+    run("layout.resize", { id, px: Math.max(240, Number(shared(`${key}.width`) ?? shared(`${id}.width`)) || WIDTH) });
+    const before = shared(`${key}.sections`) ?? shared(`${id}.sections`) ?? {};
     for (const c of sections) {
       const size = before[c.id];
       if (size?.px) run("layout.resize", { id: c.id, px: size.px });
       else if (size?.weight) run("layout.resize", { id: c.id, weight: size.weight });
     }
+    setShared(`${key}.sections`, null);
     setShared(`${id}.sections`, null);
   }
 }
@@ -700,7 +705,7 @@ export default class AgentPrs extends View {
   // An agent's icon on a PR: click to go to the agent.
   agentChip(t, p, { agent, created }, tabs) {
     const pic = icon(agent.program, 13, t.foreground);
-    return h_flex()
+    return this.inner(h_flex())
       .id(`pr-agent-${p.repo}-${p.number}-${agent.address}`)
       .flex_none()
       .h(20)
@@ -782,7 +787,7 @@ export default class AgentPrs extends View {
     return v_flex()
       .gap(6)
       .child(
-        h_flex()
+        this.inner(h_flex())
           .id(`pipe-${p.repo}-${p.number}`)
           .h(14)
           .gap(8)
@@ -828,7 +833,7 @@ export default class AgentPrs extends View {
           return [
             row,
             ...failing.map((k, j) =>
-              h_flex()
+              this.inner(h_flex())
                 .id(`check-${p.repo}-${p.number}-${i}-${j}`)
                 .pl(17)
                 .gap(6)
@@ -1000,7 +1005,7 @@ export default class AgentPrs extends View {
     const busy = this.rereading.has(p.url);
     const off = busy || this.acting.has(p.url);
     const glyph = svg(ICON("refresh")).size(12);
-    return div()
+    return this.inner(div())
       .id(`reread-${p.repo}-${p.number}`)
       .size(22)
       .flex_none()
@@ -1028,7 +1033,7 @@ export default class AgentPrs extends View {
     const off = Boolean(doing) || disabled;
     const filled = a.kind === "primary" && !off;
     const danger = a.kind === "danger";
-    return h_flex()
+    return this.inner(h_flex())
       .id(`act-${p.repo}-${p.number}-${a.id}`)
       .flex_none()
       .h(22)
@@ -1060,6 +1065,21 @@ export default class AgentPrs extends View {
   // A PR: its title and where it's from, where it stands, its pipeline, and what you can do
   // to it. The left gutter holds its draft-or-open icon and its standing's glyph, so the
   // cards in a list read down one column.
+  // A button or link inside a PR's card. The card hears the press too, and its click would
+  // open the PR, so each one notes when it was pressed, and the card lets a click go that
+  // began on one. (By time, not by stopping the event: that holds whichever of the two hears
+  // the press first.)
+  inner(el) {
+    return el.on_mouse_down("left", () => {
+      this.innerPressAt = Date.now();
+    });
+  }
+
+  // Whether the card's latest press was on a control inside it: both noted it at once.
+  pressedInner() {
+    return Math.abs((this.innerPressAt ?? 0) - (this.cardPressAt ?? 0)) < 250;
+  }
+
   card(t, p, owners, tabs) {
     const all = standing(t, p);
     const mono = settings().font_family ?? "JetBrains Mono";
@@ -1079,7 +1099,13 @@ export default class AgentPrs extends View {
       .cursor_pointer()
       .hover((s) => s.border_color(t.input))
       .tooltip(`${p.title} · click to open on GitHub`)
-      .on_click(() => openUrl(p.url))
+      .on_mouse_down("left", () => {
+        this.cardPressAt = Date.now();
+      })
+      .on_click(() => {
+        if (this.pressedInner()) return;
+        openUrl(p.url);
+      })
       .child(
         v_flex()
           .px(10)

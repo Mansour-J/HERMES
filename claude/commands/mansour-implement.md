@@ -1,60 +1,98 @@
 ---
-description: Implement the fix, continue the implementation checklist, and update the checklist for a ticket.
-argument-hint: <ticket-id>
+description: Implement a Jira ticket from its plan and checklist, on the ticket's branch in a worktree.
+argument-hint: <ticket key or link> [extra guidance]
+disable-model-invocation: true
 ---
 
 # Ticket
 
-{{arguments1}}
+Arguments: $ARGUMENTS
 
-The implementation plan is located at:
+The ticket's key, `KEY` below, is the first word of the arguments, in capitals. From a link, it's the key at its end (`…/browse/ABC-123` gives `ABC-123`). Anything after the first word is extra guidance from me for this run. If there are no arguments, or the first word holds no key like `ABC-123`, ask me for the ticket and wait.
 
-- `{{settings.work.notes}}/plans/{{arguments1}}.md`
+Implement `KEY` (https://{{settings.jira.site}}/browse/KEY) from its plan and checklist:
 
-The implementation checklist is located at:
+- Plan: `{{settings.work.notes}}/plans/KEY.md`
+- Checklist: `{{settings.work.notes}}/checklists/KEY.md` (older ones: `{{settings.work.notes}}/KEY.md`)
 
-- `{{settings.work.notes}}/{{arguments1}}.md`
+If either is missing, stop and tell me to run `/mansour-plan KEY` first.
 
-## Repository selection
+## Read the ticket again
 
-Before implementing, choose which repositories are in scope:
+Read the ticket with the Atlassian tools, and compare it with the plan's date. Say what's newer and bears on the work (a comment, a change to the description or acceptance criteria, a new link), one line each. If it changes what to build, stop and tell me. With my OK, update the plan and checklist before changing code.
 
-1. List the available repositories by enumerating the git repositories under `{{settings.work.repos}}` (each immediate subdirectory that contains a `.git` folder).
-2. Present them to me as a **multi-select** list using the `AskUserQuestion` tool so I can pick one or more. If there are more repositories than a single multi-select question allows, split them across multiple questions (all with `multiSelect: true`).
-3. Wait for my selection. Treat only the repositories I select as in scope for this implementation.
-4. Do not begin implementing until I have made a selection.
+## Repositories
 
 {{settings.commands.implement_note}}
+
+Take the repositories from the plan's "Affected repositories", plus any that already have a worktree under `{{settings.work.worktrees}}/KEY/`. If my extra guidance names repositories, use those instead. Confirm with one `AskUserQuestion` (single choice): **Use these** (name them), or **Change** (I'll say which). Wait for my answer. Only those repositories are in scope.
+
+If the plan names no repositories (an older plan), list the git repositories under `{{settings.work.repos}}` (each immediate subdirectory that contains a `.git` folder) and ask with `AskUserQuestion` (`multiSelect: true`), the likeliest from the plan first, each with a one-line reason.
+
+## Worktree on the ticket's branch
+
+Implement on the ticket's own branch, in a git worktree of the ticket's own, never in my checkouts. They may hold other work: don't switch, pull, stash, reset or edit anything in `{{settings.work.repos}}/<repo>`, unless that checkout already has this ticket's branch (step 3). In each repository:
+
+1. Run `git -C {{settings.work.repos}}/<repo> fetch origin`, then find the default branch (master or main) with `git symbolic-ref --short refs/remotes/origin/HEAD` (run `git remote set-head origin --auto` first if that fails).
+2. The ticket's branches are the ones whose name has `KEY` not followed by a digit, in any case, local or on `origin`. If there's more than one, ask me with `AskUserQuestion` which to work on, or whether to start a new one.
+3. If the ticket's branch is already checked out somewhere (`git worktree list --porcelain`, the main checkout included), work there. Its uncommitted changes are this ticket's work in progress: keep them.
+4. Otherwise use `{{settings.work.worktrees}}/KEY/<repo>`, the worktree `/mansour-plan` makes:
+   - Already there: it must be clean. If it isn't, stop and tell me the files. Then, in it, `git switch <branch>`, or for a new branch `git switch --no-track -c <type>/KEY-<short-description> origin/<default>`.
+   - None yet: `git -C {{settings.work.repos}}/<repo> worktree add <path> <branch>`, or for a new branch `git -C {{settings.work.repos}}/<repo> worktree add --no-track -b <type>/KEY-<short-description> <path> origin/<default>`. If git says the path is registered but missing, run `git worktree prune` and try again.
+
+   Name a new branch the way the repository names its branches, if it has a convention. Keep `KEY` in it.
+5. A ticket branch that's behind `origin/<default>` must be brought level first. If it has never been pushed and has no uncommitted changes, rebase it onto `origin/<default>`. Otherwise ask me whether to rebase or merge (a pushed branch needs a force-push after a rebase). Never force-push without asking.
+6. Never commit to, or implement on, the default branch itself.
+7. List each repository's worktree path and branch in one line, then read, edit, build and test only there, with absolute paths or `git -C`.
+
+A new worktree has none of the ignored files a checkout builds up (`node_modules`, build output, local config such as `.env`):
+
+- Install dependencies in it the way the repository does (its README, CI or lockfile) before building or testing.
+- If the work needs an ignored local file from the main checkout, copy it and name it in one line. Never commit it.
+- Its folder has the repository's name, so `docker compose` there runs the same project (containers, volumes) as the main checkout.
+- Don't remove worktrees, this one or any other. I clean them up.
+
+## Has the code moved since the plan?
+
+The plan's header names, for each repository, the commit of the default branch it was planned against. If `origin/<default>` has moved on since, run `git log --oneline <commit>..origin/<default> -- <the files the plan names>`. If any commits touch those files, list them in one line, re-check the parts of the plan they affect, and say what changed. If the plan no longer holds, stop and tell me. Skip this for an older plan without commits.
+
+## Data: non-production, read-only
+
+Reading the ticket, its linked pages and GitHub is fine. Changing code in the repositories, on the ticket's branch, is the job. Changing data or infrastructure anywhere is not. Only read data when the work needs it, and then:
+
+- **Non-production only.** Dev, test and other non-production environments, accounts, profiles, databases and endpoints. Never production. If you can't tell whether something is production, treat it as production: don't touch it, and ask me.
+- **Read only.** No change of any kind: no `INSERT`, `UPDATE`, `DELETE`, `MERGE` or DDL; no `aws` create, put, update, delete, modify, start, stop or invoke calls; no `POST`, `PUT`, `PATCH` or `DELETE` requests; no deploys, messages on queues, flag or config changes; no Jira or Confluence edits, transitions or comments. Use describe, list, get and `SELECT`.
+- This holds for changes you would undo afterwards, too.
+- Tests may write to databases and services they start themselves locally (containers, in-memory); never to a shared environment.
 
 ## Instructions
 
 Before making changes:
 
-- Read and understand both the implementation plan and checklist.
+- Read and understand both the plan and the checklist.
 - Use any relevant Claude Code skills for the technologies and tasks involved.
-- Follow the existing architecture, coding style, conventions, and established patterns in the codebase.
+- Follow the existing architecture, coding style, conventions, and established patterns in the codebase, starting with the ones the plan names.
 - Do **not** make assumptions. If required information is unavailable or ambiguous, ask for clarification instead of guessing.
 - Prefer minimal, focused changes that satisfy the requirements.
 - Reuse existing implementations where appropriate rather than introducing new patterns.
 
 ### Outstanding questions
 
-If the implementation plan or checklist contains unresolved questions, assumptions, TODOs requiring clarification, or blockers:
+If the plan's or checklist's Open questions have unanswered items, or you find unresolved assumptions, TODOs needing clarification, or blockers:
 
 1. Stop implementation.
 2. Present **all** outstanding questions as a numbered list.
 3. Wait for my response before making any implementation changes.
 4. After I answer:
-   - update the implementation plan with the decisions and resolved assumptions
-   - update the checklist to record the resolved questions
-   - remove or mark the outstanding questions as resolved
+   - record the decisions in the plan, under the questions they answer
+   - tick the questions in the checklist, each with its answer
 5. Continue implementation using the updated plan and checklist.
 
 ### Bug fixes (TDD)
 
 If the work involves fixing a bug:
 
-1. First reproduce the bug by writing or updating a failing automated test that demonstrates the issue.
+1. First reproduce the bug by writing or updating a failing automated test that demonstrates the issue (the plan's Tests section says which).
 2. Explain the root cause and your findings.
 3. Stop and ask me to validate the failing test.
 4. Wait until I confirm (for example, by saying **"proceed with the fix"**) before implementing the code change.
@@ -63,82 +101,45 @@ If the work involves fixing a bug:
 
 ### Implementation
 
-1. Implement the required fix according to the implementation plan.
-2. Continue working through the remaining checklist items in priority order until either:
+1. Implement according to the plan, one change at a time, in the checklist's order.
+2. Continue through the checklist until either:
    - all checklist items are complete, or
    - you encounter a new blocker.
 
 ### Validation
 
-- Verify that the implementation satisfies the acceptance criteria.
+- Verify that the implementation satisfies the plan's acceptance criteria.
 - Run all relevant tests, linters, type checks, and validation commands where applicable.
 - Fix any issues introduced by your changes.
 - Ensure the solution integrates cleanly with the existing codebase.
 
+### Review your own diff
+
+Before the summary, read each repository's whole change since its branch started: `git -C <worktree> diff $(git -C <worktree> merge-base origin/<default> HEAD)`, and `git -C <worktree> status --short` for new files. Fix what you find:
+
+- debugging leftovers: prints, extra logging, commented-out code, focused or skipped tests
+- changes the ticket doesn't need: unrelated edits, reformatting, renames
+- files that must never be committed: copied local files such as `.env`, build output, anything holding a secret or token
+- a TODO without a checklist item
+
 ### Checklist
 
-Update the checklist to reflect:
+Update the checklist, keeping the shape `/mansour-plan` wrote it in (checkboxes; Implementation, Verification, Open questions, Follow-ups):
 
-- completed items
-- newly completed work
-- remaining work
-- resolved questions
-- newly discovered follow-up tasks
-- blockers and recommended next steps (if any)
+- tick what's done
+- add tasks found along the way under their change, and work outside the ticket under Follow-ups
+- record the answers to open questions
+- note a blocker as a plain line, `Blocked: <why>`, under its change
 
 ### Constraints
 
 - Do **not** create a commit, push, or open a pull request **unless I explicitly ask**.
-  When I do ask, follow the Pull requests section below.
+  When I do ask, follow my pull request rules (`~/.claude/CLAUDE.md`).
 - Do **not** leave the repository in a failing state.
 
 ### Final summary
 
-Provide a summary including:
-
-- what was implemented
+- what was implemented, with each repository's worktree path and branch
 - validation performed and results
-- checklist items completed
-- remaining work
-- blockers (if any)
-- risks or follow-up recommendations
-- make sure to change the name of the existing claude session to the ticket name: $ARGUMENTS
-## Pull requests
-
-When raising a PR (any repo) - **including PRs raised outside this skill**, e.g. an ad-hoc
-"raise a PR for X" request, a CI fix, or a dependency bump:
-
-- Create it as a **draft** unless I explicitly ask for a ready-for-review PR.
-- **No PR body. Draft or non-draft, no exceptions.** Pass `--body ""` to `gh pr create`. Do not
-  fill in the repo's pull request template, and do not substitute a "short" body. This holds even
-  when the change looks like it needs explaining - a CI break, a security pin, a subtle fix, a
-  non-obvious root cause. It does not need explaining in the PR.
-- **No PR comments.** Do not post review comments, summary comments, or follow-up comments on the PR.
-- The title carries the whole message: follow {{settings.work.commit_style}}.
-- Let the code speak for itself. Context belongs in the plan and checklist under
-  `{{settings.work.notes}}/`, not in the PR.
-- Keep the commit message short too - a one-line conventional-commit subject is usually enough.
-- Prefer several small PRs that can merge independently over one large one. Split shared
-  plumbing (feature-toggle enum values, scope grants, config) into its own PR so it can merge first.
-- `gh pr edit` can fail on repos with GitHub Projects (classic) enabled. If it errors with a
-  GraphQL `projectCards` deprecation message, the edit did **not** apply - verify with
-  `gh api repos/<owner>/<repo>/pulls/<n> --jq .body` and patch via
-  `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> --input <file.json>` instead.
-- GitHub cannot delete a PR. If asked to delete/recreate one, close it and open a new one from the
-  same branch, and say plainly that it was closed rather than deleted.
-
-## Be non-verbose, always
-
-This applies to everything, not just PRs: PR titles and bodies, commit messages, chat replies,
-checklists, and plan updates.
-
-- Answer with the result. Skip the preamble, the restatement of what I asked, and the recap of what
-  you just did when it is already visible in the diff or the tool output.
-- No summary tables, no "What was breaking / The change / Why this is safe" section headers, no
-  bulleted victory laps at the end of a task.
-- Evidence over narration: a version number, a file path, a run ID, a one-line verdict. If I want
-  the reasoning I will ask for it.
-- Commit messages: a one-line conventional-commit subject is usually enough. Add a body only when
-  the *why* genuinely cannot be inferred, and keep it to a couple of lines.
-- Prefer a few sentences over a few paragraphs. If a reply is getting long, that is the signal to
-  cut it, not to add headings.
+- checklist items done, and what's left
+- blockers, risks and follow-ups, if any

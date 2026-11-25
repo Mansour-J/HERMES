@@ -3,8 +3,9 @@
 #   mods/<name>/            -> ~/.config/herdr-app/mods/<name>      (Herdr; $HERDR_APP_HOME)
 #   layouts/<name>.json     -> ~/.config/herdr-app/layouts/<name>.json
 #   claude/commands/<n>.md  -> ~/.claude/commands/<n>.md            (Claude Code; $CLAUDE_CONFIG_DIR)
+#   claude/global.md        -> ~/.claude/CLAUDE.md                  (rules for every Claude Code session)
 #
-# Layouts and commands are templates: each {{settings.<path>}} in them is filled in from your
+# Layouts, commands and claude/global.md are templates: each {{settings.<path>}} in them is filled in from your
 # settings file (~/.config/hermes/settings.json; $HERMES_SETTINGS), which holds everything
 # that's yours (AWS account, Jira site, work folders) and is never in this repo. The filled-in
 # copies are kept in ~/.local/state/herder-customizations/build, and those are what's linked.
@@ -47,7 +48,7 @@ def fill: gsub("\\{\\{settings\\.(?<k>[A-Za-z0-9_.-]+)\\}\\}"; value(.k));
 '
 
 # Layouts and commands are filled in; mods are linked as they are.
-templated() { case "$1" in layouts/* | claude/commands/*) return 0 ;; esac; return 1; }
+templated() { case "$1" in layouts/* | claude/commands/* | claude/global.md) return 0 ;; esac; return 1; }
 
 # Fills in an item's copy, swapped in whole. A JSON file's settings are filled in as strings.
 render() {
@@ -69,12 +70,19 @@ items() {
   for d in "$repo"/mods/*/; do [ -f "$d/main.js" ] && printf 'mods/%s\t%s\n' "$(basename "$d")" "$app/mods/$(basename "$d")"; done
   for f in "$repo"/layouts/*.json; do [ -f "$f" ] && printf 'layouts/%s\t%s\n' "$(basename "$f")" "$app/layouts/$(basename "$f")"; done
   for f in "$repo"/claude/commands/*.md; do [ -f "$f" ] && printf 'claude/commands/%s\t%s\n' "$(basename "$f")" "$claude/commands/$(basename "$f")"; done
+  [ -f "$repo/claude/global.md" ] && printf 'claude/global.md\t%s\n' "$claude/CLAUDE.md"
   return 0
 }
 
 link() {
   local item="$1" dst="$2" src="$repo/$1"
   if templated "$item"; then src="$build/$item"; fi
+  # A CLAUDE.md that isn't this link is your own rules: it's never moved or replaced.
+  if [ "$item" = claude/global.md ] && { [ -e "$dst" ] || [ -L "$dst" ]; } && [ "$(readlink "$dst")" != "$src" ]; then
+    echo "! $dst is your own, so it's left as it is. Add the rules in $src to it,"
+    echo "  or move it away and run ./link.sh again."
+    return 0
+  fi
   mkdir -p "$(dirname "$dst")"
   if [ -e "$dst" ] && [ ! -L "$dst" ]; then
     # Something real is there: the original, or a file its program rewrote in place of the link.

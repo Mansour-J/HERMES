@@ -202,7 +202,6 @@
                     "props": {
                       "node": "work-side",
                       "site": "{{settings.jira.site}}",
-                      "space": "{{settings.work.space}}",
                       "workdir": "{{settings.work.repos}}",
                       "notes": "{{settings.work.notes}}"
                     }

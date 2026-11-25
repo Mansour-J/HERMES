@@ -106,7 +106,8 @@ My tickets in the **current sprint**, the **next sprint** and the **backlog**, r
 
 - **Click a ticket** to open it in Jira.
 - **Progress bar** in four stages: plan (green when written), implementation (amber while the checklist has work left, green when done), PR (blue when open, red when CI fails) and merged (purple). Click a stage to open its plan, its checklist or its PR.
-- **PLAN** and **IMPLEMENT** run `/mansour-plan` and `/mansour-implement` in the ticket's agent, or in a new Claude tab named after the ticket. The next step is highlighted, and a step that's done turns its button off.
+- **PLAN** and **IMPLEMENT** run `/mansour-plan` and `/mansour-implement` for the ticket in a new Claude tab named after it, in the space you're in. The next step is highlighted, and a step that's done turns its button off. A click on a button, a stage or the agent icon does only that; a click anywhere else on the ticket opens it in Jira.
+- **The commands.** `/mansour-plan KEY` reads the ticket, looks for PRs and branches already started, suggests the repositories, and writes a plan and a checklist in the shape the progress bar reads. `/mansour-implement KEY` reads the ticket again for anything newer, checks whether the code has moved under the plan, works through the checklist on the ticket's branch, and reviews its own diff. Either takes a ticket link too, and words after the key as extra guidance.
 - **An agent icon** on a ticket that an agent's tab or space is named after. Click it to jump to that agent.
 - **Add any ticket** by its key or link, even one that isn't assigned to you. It's listed under *Added* until you remove it, and nothing changes in Jira.
 - **Collapsible.** Each ticket is one line with a mini progress bar until you open it, and one button expands or collapses them all.
@@ -157,6 +158,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 
 - **Nothing runs by itself, unless you say so.** No fetches on start, and no timers unless you tick auto-refresh (it's off until you do): network and model calls happen only when you press ↻ (a section's, or a PR's), REFRESH ALL or a run button, or when auto-refresh's time comes round.
 - **Nothing changes on GitHub unless you press it.** A PR's buttons run `gh` as you, and only the ones GitHub says you may use are offered: Merge stays off unless the PR can merge and you can write to its repository. Merging, auto-merge and closing ask first.
+- **The ticket commands stay in bounds.** `/mansour-plan` and `/mansour-implement` read data only from non-production, and never change it. They work in a git worktree of their own per ticket and repository, so your checkouts are never switched or touched: `/mansour-plan` reads the latest default branch there, and `/mansour-implement` works on the ticket's own branch. They stop rather than stash or discard anything. `/mansour-plan` asks before replacing or deleting a ticket's existing plan and checklist.
 - **Secrets never reach the mods.** The ECR password and the CodeArtifact token stay in shell variables and are passed on by `printf`, a builtin. So they never appear in a process's arguments (visible in `ps`), in output, or in JavaScript.
 - **The token file is safe.** It's written owner-only (600), built beside the old file and swapped in whole, so it's never half-written and a failed run leaves it untouched.
 - **Claude usage needs no token.** It's read through Claude Code itself, and of the account only the email, organization, plan and sign-in end are kept.
@@ -168,7 +170,7 @@ Everything a button does can also be run with `herdr-app do <command>`, or bound
 ```sh
 mkdir -p ~/.config/hermes
 cp settings.example.json ~/.config/hermes/settings.json   # then put your own values in it
-./link.sh                                   # link into ~/.config/herdr-app and ~/.claude/commands
+./link.sh                                   # link into ~/.config/herdr-app and ~/.claude
 herdr-app do layout.switch --name main-prs  # or ctrl-shift-l
 ```
 
@@ -188,9 +190,9 @@ Everything that's yours lives in `~/.config/hermes/settings.json`, never in this
 | `aws.profile` · `.region` · `.account` · `.codeartifact_domain` | Daily's sign-in, ECR login and CodeArtifact token |
 | `jira.site` | where the Jira section looks, and the ticket links |
 | `work.repos` | the folder of repositories a new ticket agent starts in, and that the commands list |
-| `work.space` | the Herdr space a new ticket agent opens in |
 | `work.notes` | where `/mansour-plan` writes plans and checklists, and the progress bars read them |
-| `work.commit_style` | how the commands title commits and PRs |
+| `work.worktrees` | where the commands make their git worktrees, as `<worktrees>/<ticket>/<repo>`. Keep it outside `work.repos`. |
+| `work.commit_style` | how commits and PRs are titled in the repositories under `work.repos` |
 | `commands.plan_note` · `.implement_note` | notes on your repositories for the commands, a list of lines each |
 
 The layout and the commands are templates: `./link.sh` fills in each `{{settings.<name>}}` from this file and links the filled-in copies. A setting the file doesn't have stops it before anything changes. Leave a value empty (`""`) to go without it: a section whose settings are empty says what's missing.
@@ -209,6 +211,7 @@ mods/
 layouts/
   main-prs.json    the window: Herdr's `main` layout plus the panel (`work-side`), and Refresh, Daily and Claude usage in the bottom bar
 claude/commands/   /mansour-plan and /mansour-implement, the commands the Jira buttons run
+claude/global.md   rules for every Claude Code session (pull requests, brevity), linked as ~/.claude/CLAUDE.md
 docs/              the logo, screenshots, and the demo layout they're taken from
 settings.example.json   what ~/.config/hermes/settings.json holds
 link.sh            fills in your settings and links it all where Herdr and Claude Code read it
@@ -225,7 +228,7 @@ herdr-app check mods/agent-prs
 herdr-app status   # any errors
 ```
 
-If something real sits where a link should be, `./link.sh` moves it to `~/.local/state/herder-customizations/backup/` and says so when it differs from this repo. That happens if Herdr rewrote the layout file itself.
+If something real sits where a link should be, `./link.sh` moves it to `~/.local/state/herder-customizations/backup/` and says so when it differs from this repo. That happens if Herdr rewrote the layout file itself. The one exception is `~/.claude/CLAUDE.md`: if you already have one, it's left as it is, and `./link.sh` says where the rules are to add to it.
 
 Never put your own details in the repo: an account, a site, a folder or a repository name goes in the settings file, and reaches a layout or command as `{{settings.<name>}}`.
 
@@ -271,7 +274,8 @@ Remove the links:
 - `~/.config/herdr-app/layouts/main-prs.json`
 - `~/.claude/commands/mansour-plan.md`
 - `~/.claude/commands/mansour-implement.md`
+- `~/.claude/CLAUDE.md`
 
-Your settings are in `~/.config/hermes/`, and the filled-in layout and commands in `~/.local/state/herder-customizations/build/`.
+Your settings are in `~/.config/hermes/`, and the filled-in layout, commands and rules in `~/.local/state/herder-customizations/build/`.
 
 To keep using the customizations without this repo, copy them back in: `cp -rL`.

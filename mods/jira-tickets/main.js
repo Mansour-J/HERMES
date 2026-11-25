@@ -12,13 +12,13 @@
 // merged (your PRs whose title or branch names the ticket, one GitHub search). Like the
 // tickets, it's read only when the person presses refresh.
 //
-// Under it, Plan and Implement run /mansour-plan and /mansour-implement for the ticket: in
-// the ticket's agent when it has one (a tab named after the ticket) and it's free, else in
-// a new Claude tab named after the ticket (layout props: space, workdir, agent).
+// Under it, Plan and Implement run /mansour-plan and /mansour-implement for the ticket in a
+// new Claude tab named after it, in the space you're in (layout props: workdir, agent).
+// A click on any button or link inside a ticket does only that: it never opens the ticket.
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, exec, home, readTextFile, run, notify, nextCommand, theme, layout, props, shared, setShared, window } from "herdr";
+import { agents, spaces, focused, exec, home, readTextFile, run, notify, nextCommand, theme, layout, props, shared, setShared, window } from "herdr";
 import { DEMO_GROUPS, DEMO_ADDED, DEMO_PROGRESS, DEMO_OPEN, DEMO_FETCHED_AT } from "./demo.js";
 
 const ICON = (name) => `mods/jira-tickets/icons/${name}.svg`;
@@ -57,9 +57,9 @@ const TYPE_ICON = [
   [/epic/i, "epic"],
   [/task|chore|spike/i, "task"],
 ];
-// Your Jira site, where /mansour-plan and /mansour-implement leave their files, and where a
-// new agent for a ticket starts (its space, folder and program) come from the layout props:
-// site, notes, space, workdir, agent. link.sh fills them in from your settings file, so none
+// Your Jira site, where /mansour-plan and /mansour-implement leave their files, and what a
+// new agent for a ticket starts with (its folder and program) come from the layout props:
+// site, notes, workdir, agent. link.sh fills them in from your settings file, so none
 // of them is written here. Without a site there's nothing to look up.
 const AGENT_ARGV = ["claude"];
 const NOTES = (h) => `${h}/notes`;
@@ -152,19 +152,24 @@ function toggle() {
   const node = find(layout(), id);
   if (!node) return;
   const sections = node.type === "column" ? node.children ?? [] : [];
+  // The sizes to go back to are kept per layout: another layout with a column of the same id
+  // (the screenshots' demo) mustn't overwrite them while this one is folded. (Before they
+  // were kept per column only, so a panel folded then still has them there.)
+  const key = `${shared("layout") ?? "layout"}.${id}`;
   if (!narrow()) {
-    setShared(`${id}.width`, width());
-    setShared(`${id}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
+    setShared(`${key}.width`, width());
+    setShared(`${key}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
     run("layout.resize", { id, px: RAIL });
     for (const c of sections) run("layout.resize", { id: c.id, px: RAIL_SECTION });
   } else {
-    run("layout.resize", { id, px: Math.max(240, Number(shared(`${id}.width`)) || WIDTH) });
-    const before = shared(`${id}.sections`) ?? {};
+    run("layout.resize", { id, px: Math.max(240, Number(shared(`${key}.width`) ?? shared(`${id}.width`)) || WIDTH) });
+    const before = shared(`${key}.sections`) ?? shared(`${id}.sections`) ?? {};
     for (const c of sections) {
       const size = before[c.id];
       if (size?.px) run("layout.resize", { id: c.id, px: size.px });
       else if (size?.weight) run("layout.resize", { id: c.id, weight: size.weight });
     }
+    setShared(`${key}.sections`, null);
     setShared(`${id}.sections`, null);
   }
 }
@@ -387,6 +392,7 @@ export default class JiraTickets extends View {
       for (;;) {
         const command = await nextCommand();
         if (command === "refresh") this.refresh(cx);
+        if (command === "trace") setShared("jira.trace", this.trace ?? []); // TEMP
         if (command === "toggle") toggle();
         if (command === "expand-all" || command === "collapse-all") this.foldAll(command === "expand-all", cx);
         const [verb, ...rest] = command.split(/[\s:]+/);
@@ -657,16 +663,12 @@ export default class JiraTickets extends View {
     const prLine = (x) =>
       `${prName(x)} ${x.state === "MERGED" ? "merged" : x.draft ? "draft" : "open"}${x.state === "OPEN" ? `, CI ${{ SUCCESS: "passing", FAILURE: "failing", ERROR: "failing", PENDING: "running", EXPECTED: "waiting" }[x.ci] ?? "none"}` : ""}`;
     const segment = (id, color, tip, url, slices) =>
-      div()
+      this.inner(div(), `${ticket.key}-${id}`, () => url && openUrl(url))
         .id(`tk-${ticket.key}-${id}`)
         .flex_1()
         .py(3)
         .cursor_pointer()
         .tooltip(tip)
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          if (url) openUrl(url);
-        })
         .child(
           slices
             ? h_flex().h(5).gap(1).rounded(3).overflow_hidden().children(slices.map((c) => div().flex_1().h_full().bg(c)))
@@ -730,58 +732,33 @@ export default class JiraTickets extends View {
       .child(div().flex_none().w(78).text_right().text_size(10.5).font_medium().text_color(color).child(word));
   }
 
-  // Runs a command for a ticket: in its agent when it has one and that agent is free, else
-  // in a new Claude tab named after the ticket.
+  // Runs a command for a ticket in a new Claude tab named after it, in the space you're in.
   runCommand(ticket, command) {
     const text = `/${command} ${ticket.key}`;
-    const agent = agentFor(ticket.key, agents());
-    if (agent) {
-      if (agent.status === "working" || agent.status === "blocked") {
-        notify({
-          title: `${ticket.key}'s agent is ${agent.status === "working" ? "busy" : "waiting on you"}`,
-          body: `${text} wasn't sent. Taking you there.`,
-          level: "warning",
-        });
-        run("pane.focus", { pane: agent.pane });
-        return;
-      }
-      // hc send won't type into an agent's open dialog, and waits out a half-typed prompt.
-      exec("hc", ["send", agent.address, text], { timeout: 20000 })
-        .then((r) => {
-          if (r.code !== 0) return notify({ title: `Couldn't send ${text}`, body: (r.stderr || r.stdout).trim().split("\n")[0], level: "error" });
-          run("pane.focus", { pane: agent.pane });
-          notify({ title: `Sent ${text}`, body: `To ${agent.space_name} · ${agent.tab_name}.`, level: "info" });
-        })
-        .catch((e) => notify({ title: `Couldn't send ${text}`, body: String(e?.message ?? e), level: "error" }));
-      return;
-    }
-    const want = props()?.space;
-    const space = spaces().find((x) => x.name === want);
+    const here = focused()?.space;
+    this.note(`run ${text} in ${here}`);
+    const space = spaces().find((x) => x.id === here);
     run("tab.new", {
       name: ticket.key,
-      ...(space ? { space: space.id } : {}),
+      ...(here ? { space: here } : {}),
       folder: props()?.workdir || home(),
       argv: props()?.agent ?? AGENT_ARGV,
       task: text,
     });
-    notify({ title: `Started ${text}`, body: `In a new Claude tab named ${ticket.key}${space ? ` in ${space.name}` : ""}.`, level: "info" });
+    notify({ title: `Started ${text}`, body: `In a new Claude tab named ${ticket.key}${space?.name ? ` in ${space.name}` : ""}.`, level: "info" });
   }
 
-  actions(t, ticket, agent) {
+  actions(t, ticket) {
     const progress = this.progress[ticket.key];
     const st = stagesOf(progress);
     // The step that comes next stands out.
     const next = !progress ? null : st.plan === "none" ? "plan" : st.impl !== "done" ? "implement" : null;
-    const busy = agent && (agent.status === "working" || agent.status === "blocked");
-    const where = agent
-      ? busy
-        ? `Its agent (${agent.tab_name}) is ${agent.status === "working" ? "busy" : "waiting on you"}: this takes you there instead.`
-        : `Runs in its agent (${agent.space_name} · ${agent.tab_name}).`
-      : `Opens a new Claude tab named ${ticket.key}.`;
+    const where = `Opens a new Claude tab named ${ticket.key} in the space you're in.`;
     // A step that's done has its button turned off: shown with a tick, it runs nothing.
     const button = (id, label, command, about, done, doneAbout) => {
       const lead = !done && next === id;
-      return h_flex()
+      // A step that's done runs nothing, and a click on it still doesn't open the ticket.
+      return this.inner(h_flex(), `${ticket.key}-${id}`, () => !done && this.runCommand(ticket, command))
         .id(`tk-${ticket.key}-${id}`)
         .flex_none()
         .h(20)
@@ -798,11 +775,6 @@ export default class JiraTickets extends View {
         .when(done, (el) => el.opacity(0.6))
         .when(!done, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
         .tooltip(done ? doneAbout : `/${command} ${ticket.key}: ${about} ${where}`)
-        .on_click((_e, cx) => {
-          // Swallowed either way, so a click on a button never opens the ticket.
-          cx.stop_propagation();
-          if (!done) this.runCommand(ticket, command);
-        })
         .child(done ? svg(CHROME("check")).size(9).flex_none() : svg(ICON("play")).size(8).flex_none())
         .child(label);
     };
@@ -837,13 +809,52 @@ export default class JiraTickets extends View {
     return ticket.url ?? `https://${this.site()}/browse/${ticket.key}`;
   }
 
+  // A button or link inside a ticket's row, and what it does. Herdr may hand a click inside
+  // the row to the row rather than to the control, so the control notes the press, and the
+  // first click to arrive, its own or the row's, does what it does, once. The row then
+  // doesn't open the ticket.
+  inner(el, name, action) {
+    return el
+      .on_mouse_down("left", () => {
+        this.press = { at: Date.now(), name, action, done: false };
+        this.note(`press ${name}`);
+      })
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.note(`click ${name}`);
+        this.fire(cx);
+      });
+  }
+
+  // Does the pressed control's action, if it hasn't been done for this press.
+  fire(cx) {
+    const p = this.press;
+    if (!p || p.done) return;
+    p.done = true;
+    this.note(`fire ${p.name}`);
+    p.action(cx);
+  }
+
+  // Whether the row's latest press began on a control inside it: both noted it at once.
+  pressedInner() {
+    return Boolean(this.press) && Math.abs(this.press.at - (this.rowPressAt ?? 0)) < 250;
+  }
+
+  // TEMP: what the last clicks did, for `jira-tickets.trace`.
+  note(what) {
+    this.trace = [...(this.trace ?? []).slice(-15), `${new Date().toISOString().slice(11, 23)} ${what}`];
+  }
+
   // A ticket is one line (key, summary, a short progress bar) until its chevron opens it:
   // then its status, epic, agent, full progress bar and buttons show too.
   ticketRow(t, ticket, list, removable = false) {
     const done = ticket.category === "done";
     const open = this.openTickets.has(ticket.key);
     const agent = agentFor(ticket.key, list);
-    const fold = div()
+    const fold = this.inner(div(), `${ticket.key}-fold`, (cx) => {
+      open ? this.openTickets.delete(ticket.key) : this.openTickets.add(ticket.key);
+      cx.notify();
+    })
       .id(`tk-${ticket.key}-fold`)
       .size(18)
       .flex_none()
@@ -855,11 +866,6 @@ export default class JiraTickets extends View {
       .cursor_pointer()
       .hover((s) => s.bg(t.raised).text_color(t.foreground))
       .tooltip(open ? "Collapse" : "Expand: status, epic, progress and buttons")
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        open ? this.openTickets.delete(ticket.key) : this.openTickets.add(ticket.key);
-        cx.notify();
-      })
       .child(svg(CHROME(`chevron-${open ? "down" : "right"}`)).size(10));
     return h_flex()
       .id(`tk-${ticket.key}`)
@@ -873,7 +879,15 @@ export default class JiraTickets extends View {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .tooltip([ticket.status, ticket.type, ticket.priority || "no priority", ticket.updated ? `updated ${ago(ticket.updated)}` : null, "click to open"].filter(Boolean).join(" · "))
-      .on_click(() => openUrl(this.urlOf(ticket)))
+      .on_mouse_down("left", () => {
+        this.rowPressAt = Date.now();
+        this.note(`row press ${ticket.key}`);
+      })
+      .on_click((_e, cx) => {
+        this.note(`row click ${ticket.key}`);
+        if (this.pressedInner()) return this.fire(cx);
+        openUrl(this.urlOf(ticket));
+      })
       .child(fold)
       .child(svg(ICON(typeIcon(ticket.type))).size(14).mt(2).flex_none().text_color(typeColor(t, ticket.type)))
       .child(
@@ -894,7 +908,7 @@ export default class JiraTickets extends View {
               .when(!open, (el) => el.child(this.progressBar(t, ticket, true)))
               .when(open && removable, (el) =>
                 el.child(
-                  div()
+                  this.inner(div(), `${ticket.key}-remove`, (cx) => this.removeTicket(ticket.key, cx))
                     .id(`tk-${ticket.key}-remove`)
                     .flex_none()
                     .size(16)
@@ -906,10 +920,6 @@ export default class JiraTickets extends View {
                     .cursor_pointer()
                     .hover((s) => s.bg(t.hover).text_color(t.foreground))
                     .tooltip(`Remove ${ticket.key} from Added. Nothing in Jira changes.`)
-                    .on_click((_e, cx) => {
-                      cx.stop_propagation();
-                      this.removeTicket(ticket.key, cx);
-                    })
                     .child(svg(CHROME("x")).size(10)),
                 ),
               ),
@@ -933,7 +943,7 @@ export default class JiraTickets extends View {
           .child(div().flex_1().min_w(0).truncate().child(ticket.parent ?? ""))
           .when(Boolean(agent), (el) =>
             el.child(
-              h_flex()
+              this.inner(h_flex(), `${ticket.key}-agent`, () => run("pane.focus", { pane: agent.pane }))
                 .id(`tk-agent-${ticket.key}`)
                 .flex_none()
                 .h(18)
@@ -943,17 +953,13 @@ export default class JiraTickets extends View {
                 .rounded(5)
                 .hover((s) => s.bg(t.raised))
                 .tooltip(`An agent is on this: ${agent.space_name} · ${agent.tab_name}. Click to go there.`)
-                .on_click((_e, cx) => {
-                  cx.stop_propagation();
-                  run("pane.focus", { pane: agent.pane });
-                })
                 .when(Boolean(agentPic), (el) => el.child(agentPic))
                 .child(agentStatus(t, agent.status)),
             ),
           ),
       )
       .child(this.progressBar(t, ticket))
-      .child(this.actions(t, ticket, agent));
+      .child(this.actions(t, ticket));
   }
 
   groupHeader(t, g, tickets) {

@@ -77,19 +77,24 @@ function toggle() {
   const node = find(layout(), id);
   if (!node) return;
   const sections = node.type === "column" ? node.children ?? [] : [];
+  // The sizes to go back to are kept per layout: another layout with a column of the same id
+  // (the screenshots' demo) mustn't overwrite them while this one is folded. (Before they
+  // were kept per column only, so a panel folded then still has them there.)
+  const key = `${shared("layout") ?? "layout"}.${id}`;
   if (!narrow()) {
-    setShared(`${id}.width`, width());
-    setShared(`${id}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
+    setShared(`${key}.width`, width());
+    setShared(`${key}.sections`, Object.fromEntries(sections.map((c) => [c.id, c.size ?? null])));
     run("layout.resize", { id, px: RAIL });
     for (const c of sections) run("layout.resize", { id: c.id, px: RAIL_SECTION });
   } else {
-    run("layout.resize", { id, px: Math.max(240, Number(shared(`${id}.width`)) || WIDTH) });
-    const before = shared(`${id}.sections`) ?? {};
+    run("layout.resize", { id, px: Math.max(240, Number(shared(`${key}.width`) ?? shared(`${id}.width`)) || WIDTH) });
+    const before = shared(`${key}.sections`) ?? shared(`${id}.sections`) ?? {};
     for (const c of sections) {
       const size = before[c.id];
       if (size?.px) run("layout.resize", { id: c.id, px: size.px });
       else if (size?.weight) run("layout.resize", { id: c.id, weight: size.weight });
     }
+    setShared(`${key}.sections`, null);
     setShared(`${id}.sections`, null);
   }
 }

@@ -1,9 +1,9 @@
 # Herder customizations
 
-"The Herder" is the Herdr app (`herdr-app`). This repo holds my mods and layout for it, plus the Claude Code commands `/mansour-plan` and `/mansour-implement` (`claude/commands/`). `~/.config/herdr-app` and `~/.claude/commands` link to them: see README.md.
+"The Herder" is the Herdr app (`herdr-app`). This repo holds my mods and layout for it, plus the Claude Code commands `/mansour-plan` and `/mansour-implement` (`claude/commands/`) and my rules for every Claude Code session (`claude/global.md`, linked as `~/.claude/CLAUDE.md`). `~/.config/herdr-app` and `~/.claude` link to them: see README.md.
 
 - Herdr's manual is `~/.config/herdr-app/AGENTS.md`. The APIs are `herdr.d.ts` and `gpui-kit.d.ts` there. Read them; don't edit them.
-- Edit the files here, never in `~/.config/herdr-app` or `~/.claude/commands`. After saving anything, run `./link.sh`: Herdr only reloads when its own folder changes, and re-linking is what changes it. The layout and the commands are templates it fills in from `~/.config/hermes/settings.json`, so a command edit needs it too.
+- Edit the files here, never in `~/.config/herdr-app` or `~/.claude/commands`. After saving anything, run `./link.sh`: Herdr only reloads when its own folder changes, and re-linking is what changes it. The layout, the commands and `claude/global.md` are templates it fills in from `~/.config/hermes/settings.json`, so a command edit needs it too.
 - This repo is public. Nothing of mine goes in it: an AWS account, a Jira site, a work folder, a repository or ticket name goes in the settings file (shape: `settings.example.json`) and reaches a layout or command as `{{settings.<name>}}`; a mod gets it as a layout prop. Mods hold no default for any of them.
 - Check each mod you touch with `herdr-app check mods/<name>`, then `herdr-app status` for errors. Use `herdr-app shot` to see the window.
 - Nothing refreshes by itself unless I tick auto-refresh in the bottom bar's Refresh popup (mods/hermes; off until ticked, interval 1 min to 5 h). That is the only timer. Otherwise network and model calls happen only when I press ↻ or REFRESH ALL. Don't add other timers or fetches on start.

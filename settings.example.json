@@ -10,8 +10,8 @@
   },
   "work": {
     "repos": "~/projects/work",
-    "space": "work",
     "notes": "~/notes",
+    "worktrees": "~/projects/work-worktrees",
     "commit_style": "Conventional Commits with the ticket key, e.g. `feat: ABC-123 <short description>`"
   },
   "commands": {
